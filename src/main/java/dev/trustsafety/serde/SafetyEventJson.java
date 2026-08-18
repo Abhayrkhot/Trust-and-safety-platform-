@@ -17,11 +17,29 @@ public final class SafetyEventJson {
   private SafetyEventJson() {}
 
   public static SafetyEvent decode(byte[] payload) throws IOException {
-    JsonNode n = MAPPER.readTree(payload);
-    if (n == null || !n.isObject()) throw new IOException("event must be a JSON object");
-    int version = requiredInt(n, "schema_version");
+    if (payload == null)
+      throw new SafetyEventDecodingException(
+          SafetyEventDecodingException.Reason.NULL_PAYLOAD, "Kafka record value is null");
+    final JsonNode n;
+    try {
+      n = MAPPER.readTree(payload);
+    } catch (IOException e) {
+      throw new SafetyEventDecodingException(
+          SafetyEventDecodingException.Reason.MALFORMED_JSON, "malformed JSON", e);
+    }
+    if (n == null || !n.isObject())
+      throw new SafetyEventDecodingException(
+          SafetyEventDecodingException.Reason.CONTRACT_VIOLATION, "event must be a JSON object");
+    final int version;
+    try {
+      version = requiredInt(n, "schema_version");
+    } catch (RuntimeException e) {
+      throw contractViolation(e);
+    }
     if (version != 1 && version != 2)
-      throw new IOException("unsupported schema_version: " + version);
+      throw new SafetyEventDecodingException(
+          SafetyEventDecodingException.Reason.UNSUPPORTED_SCHEMA_VERSION,
+          "unsupported schema_version: " + version);
     rejectUnknown(n, version);
     try {
       String eventId = requiredText(n, "event_id");
@@ -38,11 +56,18 @@ public final class SafetyEventJson {
           requiredInt(n, "severity"),
           attributes(n.get("attributes")));
     } catch (RuntimeException e) {
-      throw new IOException("invalid safety event: " + e.getMessage(), e);
+      throw contractViolation(e);
     }
   }
 
-  private static void rejectUnknown(JsonNode n, int version) throws IOException {
+  private static SafetyEventDecodingException contractViolation(RuntimeException cause) {
+    return new SafetyEventDecodingException(
+        SafetyEventDecodingException.Reason.CONTRACT_VIOLATION,
+        "invalid safety event: " + cause.getMessage(),
+        cause);
+  }
+
+  private static void rejectUnknown(JsonNode n, int version) throws SafetyEventDecodingException {
     var allowed =
         version == 1
             ? java.util.Set.of(
@@ -70,7 +95,9 @@ public final class SafetyEventJson {
     Iterator<String> fields = n.fieldNames();
     while (fields.hasNext()) {
       String f = fields.next();
-      if (!allowed.contains(f)) throw new IOException("unknown field: " + f);
+      if (!allowed.contains(f))
+        throw new SafetyEventDecodingException(
+            SafetyEventDecodingException.Reason.CONTRACT_VIOLATION, "unknown field: " + f);
     }
   }
 

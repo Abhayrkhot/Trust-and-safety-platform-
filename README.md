@@ -3,16 +3,19 @@
 An evidence-first Java platform that consumes versioned safety events from Kafka, evaluates stateful rules in Apache Flink, serves current risk state from Redis, and stores replay-safe history in ClickHouse.
 
 ```text
-Kafka -> strict V1/V2 decode -> event-time watermarks -> keyed TTL dedup
+Kafka -> strict V1/V2 decode -> valid -> event-time watermarks -> keyed TTL dedup
       -> rolling actor state -> configurable safety rules -> risk signals
       -> Redis hot state + ClickHouse history + Prometheus metrics
+                              \-> poison -> versioned Kafka quarantine topic
 ```
 
 The implementation includes checkpoint restore tests, a real Kafka-to-databases integration path, deterministic failure injection, load/backpressure/soak gates, strict schema contracts, and security/coverage CI. Every public claim is tied to reproducible evidence in [docs/claims-and-evidence.md](docs/claims-and-evidence.md).
 
 The clean build also emits a schema-validated CycloneDX runtime SBOM at `target/bom.json`. Dependabot covers Maven and GitHub Actions, while dependency review rejects newly introduced moderate-or-higher vulnerabilities.
 
-Delivery semantics are explicit: Flink state and Kafka offsets use exactly-once checkpoints; the synchronous external sinks are at-least-once and make replay idempotent with stable signal IDs and event-time ordering. No end-to-end exactly-once or production throughput claim is made.
+Producer-controlled invalid records are classified and quarantined rather than dropped or allowed to block valid traffic. Quarantine records retain Kafka origin, a bounded base64 payload preview, full-payload SHA-256, and a stable source-coordinate key; set `SAFETY_QUARANTINE_TOPIC` to override the default `<input-topic>.quarantine` topic.
+
+Delivery semantics are explicit: Flink state and Kafka offsets use exactly-once checkpoints; Redis, ClickHouse, and Kafka quarantine are at-least-once sinks. Serving-store replays are idempotent through stable signal IDs and event-time ordering, while quarantine replays remain identifiable through the stable source-coordinate key. No end-to-end exactly-once or production throughput claim is made.
 
 ## Verify
 

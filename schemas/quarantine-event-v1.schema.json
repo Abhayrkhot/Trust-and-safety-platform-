@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trust-safety.example/schemas/quarantine-event-v1.schema.json",
+  "title": "Quarantined Safety Event V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "quarantine_id",
+    "source_topic",
+    "source_partition",
+    "source_offset",
+    "source_timestamp",
+    "failure_reason",
+    "failure_message",
+    "original_payload_bytes",
+    "payload_truncated",
+    "payload_base64",
+    "payload_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "quarantine_id": {"type": "string", "minLength": 1},
+    "source_topic": {"type": "string", "minLength": 1},
+    "source_partition": {"type": "integer", "minimum": 0},
+    "source_offset": {"type": "integer", "minimum": 0},
+    "source_timestamp": {"type": "integer"},
+    "failure_reason": {
+      "enum": ["NULL_PAYLOAD", "MALFORMED_JSON", "UNSUPPORTED_SCHEMA_VERSION", "CONTRACT_VIOLATION"]
+    },
+    "failure_message": {"type": "string", "minLength": 1, "maxLength": 512},
+    "original_payload_bytes": {"type": "integer", "minimum": 0},
+    "payload_truncated": {"type": "boolean"},
+    "payload_base64": {"type": "string", "contentEncoding": "base64"},
+    "payload_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}
