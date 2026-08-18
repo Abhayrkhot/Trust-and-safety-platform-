@@ -27,6 +27,10 @@ Optional tuning settings are `SAFETY_CHECKPOINT_INTERVAL_MS`, `SAFETY_CHECKPOINT
 - Redis, ClickHouse, and Kafka quarantine remain at-least-once sinks. Redis rejects stale event-time updates atomically; ClickHouse collapses replayed stable signal IDs in `FINAL` reads; quarantine replays keep the same source-coordinate key.
 - A successful checkpoint does not make arbitrary application upgrades state-compatible. Validate serializer and operator-UID compatibility before restoring a new revision.
 
+## ClickHouse schema upgrades
+
+Fresh installations order `risk_signals` by `(actor_id, emitted_at, signal_id)` for actor-first historical reads. `CREATE TABLE IF NOT EXISTS` does not rewrite an existing table's sort key. Before deploying this revision over an older `ORDER BY signal_id` table, inspect `SHOW CREATE TABLE risk_signals` and perform a reviewed shadow-table migration if the actor-first query shape is required; do not assume the application startup statement migrated existing data.
+
 ## Controlled failure drill
 
 Set `SAFETY_FAIL_AFTER_EVENTS` to a positive record count only in an approved drill environment. The operator fails only execution attempt zero, so a replacement TaskManager/JVM does not repeat the injected failure. Startup rejects a drill when restart attempts are disabled. Remove the setting after the drill.
