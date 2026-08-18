@@ -6,7 +6,7 @@
 - Kafka source with committed offsets and strict malformed-record rejection
 - Validation tests for required fields, enum values, versions, and timestamps
 
-## Phase 2 — Stateful event-time evaluation (next)
+## Phase 2 — Stateful event-time evaluation
 
 - Bounded-out-of-orderness watermarks with idle partitions
 - Keyed TTL `event_id` deduplication
