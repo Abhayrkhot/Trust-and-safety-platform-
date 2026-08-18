@@ -17,6 +17,7 @@ This file is the source of truth for public claims. A claim stays unverified unt
 | A serial 1 ms/event sink applies measurable backpressure and the job still drains exactly 1,000 unique signals. | `BackpressureIT`; `./verify-all.sh` | Verified 2026-08-18 |
 | A 22,000-input soak (20,000 unique plus 2,000 duplicates, with deterministic out-of-order arrivals) completes within 30 seconds and produces exactly 20,000 unique signals. | `SoakIT`; `./verify-all.sh` | Verified 2026-08-18 |
 | The embedded, in-memory-source/discard-sink load harness processed 50,000 events in 1.383560 seconds (36,138.65 events/s) on the recorded local machine. This is not Kafka-to-database throughput. | `scripts/run-local-load-benchmark.sh 50000`; `docs/results/local-load-2026-08-18.json` | Measured 2026-08-18 |
+| A finite Kafka stream runs through the production Flink graph and writes one deduplicated risk signal to both Redis and ClickHouse with matching rule/count fields. | `EndToEndPipelineIT`; `./verify-all.sh` | Verified 2026-08-18 |
 ## Verification runs
 
 - 2026-08-18 Phase 1: `./verify-all.sh` — PASS in the full Phase 1–2 workspace. Phase-specific branch verification is recorded in its PR. This is correctness evidence only, not a performance measurement.
@@ -25,6 +26,7 @@ This file is the source of truth for public claims. A claim stays unverified unt
 - 2026-08-18 Phase 4: `./verify-all.sh` — PASS; 16 unit tests plus 3 integration tests, 0 failures, 0 errors, 0 skipped; includes an embedded Flink fail/restart/completion run and both database containers. No performance measurement.
 - 2026-08-18 Phase 5: `./verify-all.sh` — PASS; 17 unit tests plus 5 integration tests, 0 failures, 0 errors, 0 skipped. Soak completed in 1.349 seconds and slow-sink test in 1.770 seconds in this run; these durations are test evidence, not production performance claims.
 - 2026-08-18 local load harness: 50,000 events, 500 actors, parallelism 4, 1.383560 seconds, 36,138.65 events/s; Java 26.0.2, macOS arm64, 10 available processors. Embedded collection source and discard sink only.
+- 2026-08-18 Phase 6: `./verify-all.sh` — PASS; 17 unit tests plus 6 integration tests, 0 failures, 0 errors, 0 skipped. The end-to-end test used Apache Kafka 3.8, Redis 8.2, ClickHouse 25.8, the production Flink evaluation graph, and exact assertions in both stores.
 
 ## Baseline (2026-08-18)
 

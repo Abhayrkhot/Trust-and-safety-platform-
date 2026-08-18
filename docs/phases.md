@@ -34,3 +34,9 @@
 - Time-bounded 20,000-unique-event soak with duplicates and out-of-order arrivals
 - Repeatable local benchmark command that emits machine context and raw results
 - GitHub Actions clean verification on every PR
+
+## Phase 6 — Full infrastructure path
+
+- Finite-offset Kafka source drives the real Flink evaluation graph
+- The same run asserts exact Redis hot state and ClickHouse historical rows
+- Duplicate Kafka event IDs are verified across the complete path
