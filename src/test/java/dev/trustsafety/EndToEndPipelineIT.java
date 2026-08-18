@@ -663,6 +663,7 @@ class EndToEndPipelineIT {
     List<Double> pairedRates = new ArrayList<>();
     List<Double> pairedStartups = new ArrayList<>();
     List<Map<String, Object>> pairs = new ArrayList<>();
+    int negativeStartupEstimates = 0;
     for (int pair = 1; pair <= smallRuns.size(); pair++) {
       LoadRun small = smallByPair.get(Integer.toString(pair));
       LoadRun large = largeByPair.get(Integer.toString(pair));
@@ -677,6 +678,7 @@ class EndToEndPipelineIT {
         double startup = small.elapsedSeconds() - smallEvents / rate;
         pairedRates.add(rate);
         pairedStartups.add(startup);
+        if (startup < 0) negativeStartupEstimates++;
         observation.put("estimated_steady_state_events_per_second", round(rate));
         observation.put("estimated_startup_seconds", round(startup));
       }
@@ -697,6 +699,13 @@ class EndToEndPipelineIT {
       result.put("median_based_startup_seconds", round(medianSmall - smallEvents / medianRate));
     }
     result.put("paired_estimates", pairs);
+    result.put("negative_startup_estimates", negativeStartupEstimates);
+    result.put("necessary_nonnegative_startup_condition_met", negativeStartupEstimates == 0);
+    result.put(
+        "interpretation",
+        negativeStartupEstimates == 0
+            ? "model remains an estimate and requires stationarity review"
+            : "diagnostic only: negative startup estimates contradict the fixed-startup model under these run conditions");
     result.put("valid_paired_rate_statistics", statisticsOrNull(pairedRates));
     result.put("valid_paired_startup_statistics", statisticsOrNull(pairedStartups));
     return result;
@@ -717,9 +726,11 @@ class EndToEndPipelineIT {
     result.put("mean", round(mean));
     result.put("median", round(median(Arrays.stream(sorted).boxed().toList())));
     result.put("sample_standard_deviation", round(sampleStandardDeviation));
+    boolean coefficientOfVariationApplicable = mean > 0;
+    result.put("coefficient_of_variation_applicable", coefficientOfVariationApplicable);
     result.put(
         "coefficient_of_variation_percent",
-        round(mean == 0 ? 0 : sampleStandardDeviation / mean * 100));
+        coefficientOfVariationApplicable ? round(sampleStandardDeviation / mean * 100) : null);
     result.put("min", round(sorted[0]));
     result.put("max", round(sorted[sorted.length - 1]));
     return result;
