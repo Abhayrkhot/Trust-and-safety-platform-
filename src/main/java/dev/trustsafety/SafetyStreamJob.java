@@ -7,6 +7,7 @@ import dev.trustsafety.serde.SafetyEventDeserializer;
 import dev.trustsafety.sink.ClickHouseHistoricalStore;
 import dev.trustsafety.sink.RedisHotStateStore;
 import dev.trustsafety.sink.RiskSignalSink;
+import dev.trustsafety.testing.FailureInjector;
 import java.time.Duration;
 import java.util.List;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -32,7 +33,10 @@ public final class SafetyStreamJob {
         .setStartingOffsets(OffsetsInitializer.committedOffsets(OffsetResetStrategy.EARLIEST))
         .setDeserializer(new SafetyEventDeserializer()).build();
     List<RuleConfig> rules=List.of(new RuleConfig("burst-severity-v1",60_000,3,120,80));
-    var signals=env.fromSource(source,watermarkStrategy(),"safety-events-kafka").uid("safety-events-kafka-v1")
+    var events=env.fromSource(source,watermarkStrategy(),"safety-events-kafka").uid("safety-events-kafka-v1");
+    String failAfter=System.getenv("SAFETY_FAIL_AFTER_EVENTS");
+    if(failAfter!=null&&!failAfter.isBlank()) events=events.map(new FailureInjector<>("configured-drill",Long.parseLong(failAfter))).name("failure-injection").uid("failure-injection-v1");
+    var signals=events
         .keyBy(SafetyEvent::actorId).process(new SafetyProcessor(rules,Duration.ofHours(24).toMillis()))
         .uid("safety-rules-v1");
     signals.sinkTo(new RiskSignalSink(() -> new RedisHotStateStore(args[3],Duration.ofHours(24)))).uid("redis-hot-state-v1");
