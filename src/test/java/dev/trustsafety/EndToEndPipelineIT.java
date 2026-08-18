@@ -2,6 +2,7 @@ package dev.trustsafety;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import dev.trustsafety.config.RuntimeConfig;
 import dev.trustsafety.model.IngestedSafetyRecord;
 import dev.trustsafety.model.QuarantinedEvent;
 import dev.trustsafety.rules.RuleConfig;
@@ -9,14 +10,18 @@ import dev.trustsafety.serde.QuarantinedEventJson;
 import dev.trustsafety.serde.SafetyEventDecodingException.Reason;
 import dev.trustsafety.serde.SafetyEventDeserializer;
 import dev.trustsafety.sink.RedisHotStateStore;
+import dev.trustsafety.testing.FailureInjector;
 import io.lettuce.core.RedisClient;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.sql.DriverManager;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Properties;
+import java.util.Set;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -27,6 +32,8 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.io.TempDir;
 import org.testcontainers.clickhouse.ClickHouseContainer;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -125,6 +132,95 @@ class EndToEndPipelineIT {
             });
   }
 
+  @Test
+  @Timeout(60)
+  void injectedRestartConvergesAllExternalStoresWithCheckpointEvidence(
+      @TempDir Path checkpointDirectory) throws Exception {
+    String topic = "safety-recovery";
+    String quarantineTopic = "safety-recovery-quarantine";
+    List<String> payloads = new ArrayList<>();
+    Set<Long> poisonOffsets = new LinkedHashSet<>();
+    for (int i = 0; i < 3_000; i++) {
+      if (i % 500 == 0) {
+        poisonOffsets.add((long) payloads.size());
+        payloads.add("not-json-" + i);
+      }
+      payloads.add(eventForActor("filler-" + i, "actor-" + i, i, 1));
+    }
+    payloads.add(eventForActor("recovery-1", "actor-recovery", 3_001, 40));
+    payloads.add(eventForActor("recovery-2", "actor-recovery", 3_002, 40));
+    produce(topic, payloads.toArray(String[]::new));
+
+    KafkaSource<IngestedSafetyRecord> source = source(topic, "recovery-group");
+    StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+    env.setParallelism(1);
+    RuntimeConfig config =
+        new RuntimeConfig(
+            RuntimeConfig.Environment.LOCAL,
+            Path.of("conf/safety-rules.json"),
+            java.util.Optional.of(checkpointDirectory.toUri()),
+            Duration.ofMillis(25),
+            Duration.ofSeconds(10),
+            Duration.ZERO,
+            1,
+            Duration.ZERO,
+            java.util.Optional.of(1_500L));
+    SafetyStreamJob.configureReliability(env, config);
+    var signals =
+        SafetyStreamJob.buildEvaluationPipeline(
+            env,
+            source,
+            List.of(new RuleConfig("recovery-rule", 60_000, 2, 80, 95)),
+            config.failureAfterEvents().orElseThrow(),
+            quarantined ->
+                SafetyStreamJob.attachQuarantineSink(
+                    quarantined, KAFKA.getBootstrapServers(), quarantineTopic));
+    String redisUri = "redis://" + REDIS.getHost() + ":" + REDIS.getMappedPort(6379);
+    SafetyStreamJob.attachServingSinks(
+        signals,
+        redisUri,
+        CLICKHOUSE.getJdbcUrl(),
+        CLICKHOUSE.getUsername(),
+        CLICKHOUSE.getPassword());
+
+    var result = env.execute("full-infrastructure-recovery");
+    Long completedCheckpoints =
+        result.getAccumulatorResult(FailureInjector.checkpointAccumulator("configured-drill"));
+    assertThat(completedCheckpoints).isPositive();
+
+    RedisClient redis = RedisClient.create(redisUri);
+    try (var connection = redis.connect()) {
+      assertThat(connection.sync().hget(RedisHotStateStore.key("actor-recovery"), "payload"))
+          .contains("recovery-rule")
+          .contains("\"observed_event_count\":2")
+          .contains("\"risk_score\":95");
+    } finally {
+      redis.shutdown();
+    }
+    try (var connection =
+            DriverManager.getConnection(
+                CLICKHOUSE.getJdbcUrl(), CLICKHOUSE.getUsername(), CLICKHOUSE.getPassword());
+        var statement = connection.createStatement();
+        var rows =
+            statement.executeQuery(
+                "SELECT count() FROM risk_signals FINAL WHERE rule_id='recovery-rule'")) {
+      assertThat(rows.next()).isTrue();
+      assertThat(rows.getLong(1)).isOne();
+    }
+
+    List<QuarantinedEvent> quarantined =
+        consumeQuarantineAtLeast(quarantineTopic, poisonOffsets.size());
+    assertThat(quarantined)
+        .allSatisfy(record -> assertThat(record.failureReason()).isEqualTo(Reason.MALFORMED_JSON));
+    assertThat(
+            quarantined.stream()
+                .map(QuarantinedEvent::sourceOffset)
+                .collect(java.util.stream.Collectors.toSet()))
+        .containsExactlyInAnyOrderElementsOf(poisonOffsets);
+    assertThat(quarantined.stream().map(QuarantinedEvent::quarantineId).distinct().count())
+        .isEqualTo(poisonOffsets.size());
+  }
+
   private static List<QuarantinedEvent> consumeQuarantine(String topic, int expected)
       throws Exception {
     Properties p = new Properties();
@@ -160,6 +256,52 @@ class EndToEndPipelineIT {
     return output;
   }
 
+  private static List<QuarantinedEvent> consumeQuarantineAtLeast(String topic, int expectedDistinct)
+      throws Exception {
+    Properties p = consumerProperties("recovery-quarantine-verifier");
+    List<QuarantinedEvent> output = new ArrayList<>();
+    try (var consumer = new KafkaConsumer<byte[], byte[]>(p)) {
+      consumer.subscribe(List.of(topic));
+      long deadline = System.nanoTime() + Duration.ofSeconds(15).toNanos();
+      while (distinctQuarantineIds(output) < expectedDistinct && System.nanoTime() < deadline)
+        decode(consumer.poll(Duration.ofMillis(250)), output);
+      decode(consumer.poll(Duration.ofSeconds(1)), output);
+    }
+    assertThat(distinctQuarantineIds(output)).isEqualTo(expectedDistinct);
+    return output;
+  }
+
+  private static void decode(
+      org.apache.kafka.clients.consumer.ConsumerRecords<byte[], byte[]> records,
+      List<QuarantinedEvent> output) {
+    records.forEach(
+        record -> {
+          try {
+            QuarantinedEvent decoded = QuarantinedEventJson.decode(record.value());
+            assertThat(new String(record.key(), StandardCharsets.UTF_8))
+                .isEqualTo(decoded.quarantineId());
+            output.add(decoded);
+          } catch (java.io.IOException e) {
+            throw new IllegalStateException(e);
+          }
+        });
+  }
+
+  private static long distinctQuarantineIds(List<QuarantinedEvent> records) {
+    return records.stream().map(QuarantinedEvent::quarantineId).distinct().count();
+  }
+
+  private static Properties consumerProperties(String groupId) {
+    Properties p = new Properties();
+    p.put("bootstrap.servers", KAFKA.getBootstrapServers());
+    p.put("group.id", groupId);
+    p.put("auto.offset.reset", "earliest");
+    p.put("enable.auto.commit", "false");
+    p.put("key.deserializer", ByteArrayDeserializer.class.getName());
+    p.put("value.deserializer", ByteArrayDeserializer.class.getName());
+    return p;
+  }
+
   private static void produce(String topic, String... payloads) {
     Properties p = new Properties();
     p.put("bootstrap.servers", KAFKA.getBootstrapServers());
@@ -172,6 +314,17 @@ class EndToEndPipelineIT {
     }
   }
 
+  private static KafkaSource<IngestedSafetyRecord> source(String topic, String groupId) {
+    return KafkaSource.<IngestedSafetyRecord>builder()
+        .setBootstrapServers(KAFKA.getBootstrapServers())
+        .setTopics(topic)
+        .setGroupId(groupId)
+        .setStartingOffsets(OffsetsInitializer.committedOffsets(OffsetResetStrategy.EARLIEST))
+        .setBounded(OffsetsInitializer.latest())
+        .setDeserializer(new SafetyEventDeserializer())
+        .build();
+  }
+
   private static String event(String id, int severity, int seconds) {
     return "{\"schema_version\":1,\"event_id\":\""
         + id
@@ -180,6 +333,21 @@ class EndToEndPipelineIT {
         + "Z\",\"ingested_at\":\"2026-08-18T12:00:0"
         + seconds
         + "Z\",\"actor_id\":\"actor-e2e\",\"event_type\":\"POLICY_MATCH\",\"severity\":"
+        + severity
+        + "}";
+  }
+
+  private static String eventForActor(String id, String actor, int millis, int severity) {
+    String timestamp = java.time.Instant.ofEpochMilli(1_787_054_400_000L + millis).toString();
+    return "{\"schema_version\":1,\"event_id\":\""
+        + id
+        + "\",\"occurred_at\":\""
+        + timestamp
+        + "\",\"ingested_at\":\""
+        + timestamp
+        + "\",\"actor_id\":\""
+        + actor
+        + "\",\"event_type\":\"POLICY_MATCH\",\"severity\":"
         + severity
         + "}";
   }

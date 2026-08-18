@@ -29,7 +29,7 @@ Optional tuning settings are `SAFETY_CHECKPOINT_INTERVAL_MS`, `SAFETY_CHECKPOINT
 
 Set `SAFETY_FAIL_AFTER_EVENTS` to a positive record count only in an approved drill environment. The operator fails only execution attempt zero, so a replacement TaskManager/JVM does not repeat the injected failure. Startup rejects a drill when restart attempts are disabled. Remove the setting after the drill.
 
-Expected evidence is a failed initial execution attempt, a successful restart, and complete unique output. `FailureRecoveryIT` exercises that invariant in the clean gate.
+Expected evidence is a failed initial execution attempt, a successful restart, at least one completed checkpoint, and complete unique output. `FailureRecoveryIT` exercises the focused restart invariant; `EndToEndPipelineIT` injects the same attempt-aware failure into a real Kafka workload and asserts post-restart convergence across Redis, ClickHouse, and Kafka quarantine.
 
 ## Observability
 
