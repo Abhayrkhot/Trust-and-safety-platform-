@@ -46,3 +46,11 @@
 - Strict V1 and V2 JSON schemas; V1 normalizes into the current internal model
 - V2 adds required tenant identity and optional trace correlation without breaking V1 producers
 - Rules load from validated JSON and support event-type plus attribute predicates
+
+## Phase 8 — Quality and security gates
+
+- Deterministic Java/config/document formatting enforced in `verify`
+- Maximum-effort SpotBugs analysis
+- Combined unit and integration line-coverage minimum
+- Runnable shaded application JAR with verified entry point
+- GitHub dependency-review and CodeQL workflows
