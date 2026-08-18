@@ -16,6 +16,7 @@ public record RuntimeConfig(
     Duration checkpointMinPause,
     int restartAttempts,
     Duration restartDelay,
+    int maxHistoryEventsPerActor,
     Optional<Long> failureAfterEvents) {
 
   public RuntimeConfig {
@@ -31,6 +32,8 @@ public record RuntimeConfig(
     if (restartAttempts < 0)
       throw new IllegalArgumentException("restartAttempts must be nonnegative");
     requireNonNegative(restartDelay, "restartDelay");
+    if (maxHistoryEventsPerActor <= 0)
+      throw new IllegalArgumentException("maxHistoryEventsPerActor must be positive");
     if (failureAfterEvents == null)
       throw new IllegalArgumentException("failureAfterEvents is required");
     failureAfterEvents.ifPresent(
@@ -54,6 +57,7 @@ public record RuntimeConfig(
         duration(environment, "SAFETY_CHECKPOINT_MIN_PAUSE_MS", 10_000),
         integer(environment, "SAFETY_RESTART_ATTEMPTS", 3),
         duration(environment, "SAFETY_RESTART_DELAY_MS", 5_000),
+        integer(environment, "SAFETY_MAX_HISTORY_EVENTS_PER_ACTOR", 100_000),
         optionalLong(environment, "SAFETY_FAIL_AFTER_EVENTS"));
   }
 

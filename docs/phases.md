@@ -89,3 +89,11 @@
 - Deprecated Flink and Jackson APIs migrated to their supported replacements
 - Test harnesses close explicitly so interrupt-capable cleanup is visible
 - Formatting recursively covers Java, Markdown, JSON, and YAML while excluding generated output
+
+## Phase 14 — Bounded keyed-history lifecycle
+
+- Configurable per-actor rolling-history cap cross-validated against rule thresholds
+- Deterministic oldest-event-time eviction under out-of-order arrival
+- Replay-stable operational risk signal and dedicated capacity metrics on breach
+- Event-time timers reclaim idle history and survive checkpoint/restore
+- Explicit telemetry for expired history and arrivals beyond the retention horizon

@@ -53,6 +53,7 @@ class SafetyStreamJobTest {
             Duration.ofSeconds(4),
             4,
             Duration.ofSeconds(3),
+            10_000,
             Optional.empty());
 
     SafetyStreamJob.configureReliability(env, config);

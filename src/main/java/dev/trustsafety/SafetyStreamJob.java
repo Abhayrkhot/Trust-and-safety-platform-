@@ -51,7 +51,13 @@ public final class SafetyStreamJob {
       KafkaSource<IngestedSafetyRecord> source,
       List<RuleConfig> rules,
       Consumer<DataStream<QuarantinedEvent>> quarantineAttacher) {
-    return buildEvaluationPipeline(env, source, rules, null, quarantineAttacher);
+    return buildEvaluationPipeline(
+        env,
+        source,
+        rules,
+        null,
+        SafetyProcessor.DEFAULT_MAX_HISTORY_EVENTS_PER_ACTOR,
+        quarantineAttacher);
   }
 
   public static DataStream<RiskSignal> buildEvaluationPipeline(
@@ -59,6 +65,22 @@ public final class SafetyStreamJob {
       KafkaSource<IngestedSafetyRecord> source,
       List<RuleConfig> rules,
       Long failAfterEvents,
+      Consumer<DataStream<QuarantinedEvent>> quarantineAttacher) {
+    return buildEvaluationPipeline(
+        env,
+        source,
+        rules,
+        failAfterEvents,
+        SafetyProcessor.DEFAULT_MAX_HISTORY_EVENTS_PER_ACTOR,
+        quarantineAttacher);
+  }
+
+  public static DataStream<RiskSignal> buildEvaluationPipeline(
+      StreamExecutionEnvironment env,
+      KafkaSource<IngestedSafetyRecord> source,
+      List<RuleConfig> rules,
+      Long failAfterEvents,
+      int maxHistoryEventsPerActor,
       Consumer<DataStream<QuarantinedEvent>> quarantineAttacher) {
     Objects.requireNonNull(quarantineAttacher, "quarantineAttacher");
     var ingested =
@@ -85,7 +107,8 @@ public final class SafetyStreamJob {
     }
     return events
         .keyBy(SafetyEvent::actorId)
-        .process(new SafetyProcessor(rules, Duration.ofHours(24).toMillis()))
+        .process(
+            new SafetyProcessor(rules, Duration.ofHours(24).toMillis(), maxHistoryEventsPerActor))
         .uid("safety-rules-v1");
   }
 
@@ -172,6 +195,7 @@ public final class SafetyStreamJob {
             source,
             rules,
             config.failureAfterEvents().orElse(null),
+            config.maxHistoryEventsPerActor(),
             quarantined ->
                 attachQuarantineSink(
                     quarantined,

@@ -164,6 +164,7 @@ class EndToEndPipelineIT {
             Duration.ZERO,
             1,
             Duration.ZERO,
+            100_000,
             java.util.Optional.of(1_500L));
     SafetyStreamJob.configureReliability(env, config);
     var signals =
