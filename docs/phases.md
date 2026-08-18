@@ -135,3 +135,11 @@
 - Exact accumulator oracle proves all 200 triggering events once each
 - Archived execution graph proves assignment to two distinct TaskManager resource IDs
 - Explicitly scoped as local multi-worker evidence, not multi-node production evidence
+
+## Phase 20 — Sixfold workload scale-up
+
+- Default real Kafka-to-serving-stores gate raised from 10,000 to 60,000 events
+- Exact store oracle raised from 1,000 to 6,000 actors per trial
+- Soak raised from 22,000 to 132,000 inputs with 120,000 unique-result assertions
+- Three revision-matched 60,000-event trials retained alongside the earlier dataset
+- No extrapolation, tuning target, or production-capacity claim
