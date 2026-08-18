@@ -127,3 +127,11 @@
 - Exact per-trial Redis-key and ClickHouse-row correctness oracles
 - Revision, dataset, container images, machine context, and all trial results retained
 - No production-capacity claim or pass/fail throughput threshold
+
+## Phase 19 — Multi-worker execution evidence
+
+- Two local Flink TaskManagers with one slot each and bounded readiness polling
+- Production keyed rule processor submitted at parallelism two
+- Exact accumulator oracle proves all 200 triggering events once each
+- Archived execution graph proves assignment to two distinct TaskManager resource IDs
+- Explicitly scoped as local multi-worker evidence, not multi-node production evidence
