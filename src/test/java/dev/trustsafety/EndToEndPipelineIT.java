@@ -2,6 +2,7 @@ package dev.trustsafety;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.trustsafety.config.RuntimeConfig;
 import dev.trustsafety.model.IngestedSafetyRecord;
@@ -16,16 +17,20 @@ import io.lettuce.core.RedisClient;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.sql.DriverManager;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import java.util.UUID;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -47,6 +52,8 @@ import org.testcontainers.utility.DockerImageName;
 
 @Testcontainers
 class EndToEndPipelineIT {
+  private static final ObjectMapper JSON = new ObjectMapper();
+
   @Container static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka-native:3.8.0");
 
   @Container
@@ -275,88 +282,77 @@ class EndToEndPipelineIT {
   }
 
   @Test
-  @Timeout(90)
+  @Timeout(600)
   void benchmarksBackloggedKafkaThroughFlinkIntoBothServingStores() throws Exception {
-    int events = positiveProperty("endToEndBenchmarkEvents", 60_000);
-    int actors = positiveProperty("endToEndBenchmarkActors", 6_000);
-    int iterations = positiveProperty("endToEndBenchmarkIterations", 1);
-    if (events % actors != 0)
-      throw new IllegalArgumentException("end-to-end benchmark events must be divisible by actors");
-    int eventsPerActor = events / actors;
-    List<Map<String, Object>> trials = new ArrayList<>();
-    double[] throughput = new double[iterations];
+    int largeEvents = positiveProperty("endToEndBenchmarkEvents", 60_000);
+    int largeActors = positiveProperty("endToEndBenchmarkActors", 6_000);
+    int warmupPairs = nonNegativeProperty("endToEndBenchmarkWarmupPairs", 0);
+    int measuredPairs = positiveProperty("endToEndBenchmarkMeasuredPairs", 1);
+    if (largeEvents % 2 != 0 || largeActors % 2 != 0)
+      throw new IllegalArgumentException("paired benchmark events and actors must be even");
+    int smallEvents = largeEvents / 2;
+    int smallActors = largeActors / 2;
+    if (largeEvents % largeActors != 0 || smallEvents % smallActors != 0)
+      throw new IllegalArgumentException(
+          "benchmark events must be divisible by actors at both sizes");
+    int eventsPerActor = largeEvents / largeActors;
+    List<LoadRun> allRuns = new ArrayList<>();
+    List<LoadRun> measuredSmall = new ArrayList<>();
+    List<LoadRun> measuredLarge = new ArrayList<>();
 
-    for (int trial = 0; trial < iterations; trial++) {
-      List<String> topics =
-          List.of(
-              "load-content-" + trial,
-              "load-activity-" + trial,
-              "load-moderation-" + trial,
-              "load-enforcement-" + trial);
-      String ruleId = "load-rule-" + trial;
-      produceLoad(topics, trial, events, actors);
-      StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-      env.setParallelism(4);
-      var signals =
-          SafetyStreamJob.buildEvaluationPipeline(
-              env,
-              source(topics, "load-group-" + trial),
-              List.of(new RuleConfig(ruleId, 60_000, eventsPerActor, eventsPerActor, 90)),
-              ignored -> {});
-      String redisUri = "redis://" + REDIS.getHost() + ":" + REDIS.getMappedPort(6379);
-      SafetyStreamJob.attachServingSinks(
-          signals,
-          redisUri,
-          CLICKHOUSE.getJdbcUrl(),
-          CLICKHOUSE.getUsername(),
-          CLICKHOUSE.getPassword());
-
-      long started = System.nanoTime();
-      env.execute("end-to-end-load-" + trial);
-      long elapsedNanos = System.nanoTime() - started;
-      throughput[trial] = events / (elapsedNanos / 1_000_000_000.0);
-
-      RedisClient redis = RedisClient.create(redisUri);
-      try (var connection = redis.connect()) {
-        assertThat(connection.sync().keys("safety:risk:actor:load-" + trial + "-*"))
-            .hasSize(actors);
-      } finally {
-        redis.shutdown();
+    int totalPairs = warmupPairs + measuredPairs;
+    for (int pair = 0; pair < totalPairs; pair++) {
+      boolean warmup = pair < warmupPairs;
+      int measuredPair = warmup ? 0 : pair - warmupPairs + 1;
+      boolean smallFirst = pair % 2 == 0;
+      int[] eventOrder =
+          smallFirst ? new int[] {smallEvents, largeEvents} : new int[] {largeEvents, smallEvents};
+      int[] actorOrder =
+          smallFirst ? new int[] {smallActors, largeActors} : new int[] {largeActors, smallActors};
+      for (int position = 0; position < eventOrder.length; position++) {
+        String runId =
+            (warmup ? "warmup-" + (pair + 1) : "measure-" + measuredPair)
+                + "-"
+                + eventOrder[position];
+        LoadRun run =
+            executeObservedLoadRun(
+                runId,
+                pair + 1,
+                measuredPair,
+                warmup,
+                position + 1,
+                eventOrder[position],
+                actorOrder[position],
+                eventsPerActor);
+        allRuns.add(run);
+        if (!warmup) {
+          if (run.events() == smallEvents) measuredSmall.add(run);
+          else measuredLarge.add(run);
+        }
       }
-      try (var connection =
-              DriverManager.getConnection(
-                  CLICKHOUSE.getJdbcUrl(), CLICKHOUSE.getUsername(), CLICKHOUSE.getPassword());
-          var statement = connection.createStatement();
-          var rows =
-              statement.executeQuery(
-                  "SELECT count() FROM risk_signals FINAL WHERE rule_id='" + ruleId + "'")) {
-        assertThat(rows.next()).isTrue();
-        assertThat(rows.getLong(1)).isEqualTo(actors);
-      }
-
-      Map<String, Object> measured = new LinkedHashMap<>();
-      measured.put("trial", trial + 1);
-      measured.put("elapsed_seconds", round(elapsedNanos / 1_000_000_000.0));
-      measured.put("events_per_second", round(throughput[trial]));
-      measured.put("redis_actor_keys", actors);
-      measured.put("clickhouse_final_rows", actors);
-      trials.add(measured);
     }
 
-    double[] sorted = throughput.clone();
-    java.util.Arrays.sort(sorted);
     Map<String, Object> result = new LinkedHashMap<>();
-    result.put("benchmark", "backlogged-kafka-to-serving-stores");
+    result.put("benchmark", "paired-backlogged-kafka-to-serving-stores");
     result.put("revision", System.getProperty("endToEndBenchmarkRevision", "unspecified"));
-    result.put("events_per_trial", events);
-    result.put("actors", actors);
+    result.put("small_events", smallEvents);
+    result.put("large_events", largeEvents);
+    result.put("small_actors", smallActors);
+    result.put("large_actors", largeActors);
     result.put("events_per_actor", eventsPerActor);
     result.put("kafka_topics", 4);
     result.put("flink_parallelism", 4);
-    result.put("risk_signals_per_trial", actors);
-    result.put("iterations", iterations);
-    result.put("trials", trials);
-    result.put("median_events_per_second", round(percentile(sorted, 0.50)));
+    result.put("warmup_pairs_excluded", warmupPairs);
+    result.put("measured_pairs", measuredPairs);
+    result.put("alternating_size_order", true);
+    result.put("runs", allRuns.stream().map(LoadRun::asMap).toList());
+    Map<String, Object> sizeStatistics = new LinkedHashMap<>();
+    sizeStatistics.put(Integer.toString(smallEvents), runStatistics(measuredSmall));
+    sizeStatistics.put(Integer.toString(largeEvents), runStatistics(measuredLarge));
+    result.put("measured_size_statistics", sizeStatistics);
+    result.put(
+        "startup_decomposition",
+        startupDecomposition(smallEvents, largeEvents, measuredSmall, measuredLarge));
     result.put("redis_image", "redis:8.2-alpine");
     result.put("clickhouse_image", "clickhouse/clickhouse-server:25.8-alpine");
     result.put("kafka_image", "apache/kafka-native:3.8.0");
@@ -365,11 +361,364 @@ class EndToEndPipelineIT {
     result.put("available_processors", Runtime.getRuntime().availableProcessors());
     result.put(
         "scope",
-        "local preloaded Kafka backlog through Flink and synchronous Redis/ClickHouse sinks; producer time excluded, job startup included");
+        "local preloaded Kafka backlogs through Flink and synchronous Redis/ClickHouse sinks; producer time excluded; raw elapsed time includes job startup; decomposition assumes elapsed(N)=startup+N/rate");
     Path output = Path.of("target", "benchmark-results", "end-to-end-load.json");
     Files.createDirectories(output.getParent());
-    new ObjectMapper().writerWithDefaultPrettyPrinter().writeValue(output.toFile(), result);
-    System.out.println(new ObjectMapper().writeValueAsString(result));
+    JSON.writerWithDefaultPrettyPrinter().writeValue(output.toFile(), result);
+    System.out.println(JSON.writeValueAsString(result));
+  }
+
+  private static LoadRun executeObservedLoadRun(
+      String runId,
+      int pair,
+      int measuredPair,
+      boolean warmup,
+      int orderInPair,
+      int events,
+      int actors,
+      int eventsPerActor)
+      throws Exception {
+    List<String> topics =
+        List.of(
+            "load-content-" + runId,
+            "load-activity-" + runId,
+            "load-moderation-" + runId,
+            "load-enforcement-" + runId);
+    String ruleId = "load-rule-" + runId;
+    produceLoad(topics, runId, events, actors);
+    StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+    env.setParallelism(4);
+    var signals =
+        SafetyStreamJob.buildEvaluationPipeline(
+            env,
+            source(topics, "load-group-" + runId),
+            List.of(new RuleConfig(ruleId, 60_000, eventsPerActor, eventsPerActor, 90)),
+            ignored -> {});
+    String redisUri = "redis://" + REDIS.getHost() + ":" + REDIS.getMappedPort(6379);
+    SafetyStreamJob.attachServingSinks(
+        signals,
+        redisUri,
+        CLICKHOUSE.getJdbcUrl(),
+        CLICKHOUSE.getUsername(),
+        CLICKHOUSE.getPassword());
+
+    long started = System.nanoTime();
+    env.execute("end-to-end-load-" + runId);
+    long elapsedNanos = System.nanoTime() - started;
+    double elapsedSeconds = elapsedNanos / 1_000_000_000.0;
+    String expectedChecksum = expectedResultChecksum(runId, ruleId, events, actors, eventsPerActor);
+    StoreObservation redis = observeRedis(redisUri, runId, ruleId, actors, eventsPerActor);
+    StoreObservation clickHouse = observeClickHouse(runId, ruleId, actors, eventsPerActor);
+    assertObservedStore(redis, actors, expectedChecksum);
+    assertObservedStore(clickHouse, actors, expectedChecksum);
+    assertThat(redis.checksumSha256()).isEqualTo(clickHouse.checksumSha256());
+    return new LoadRun(
+        runId,
+        pair,
+        measuredPair,
+        warmup,
+        orderInPair,
+        events,
+        actors,
+        elapsedSeconds,
+        events / elapsedSeconds,
+        expectedChecksum,
+        redis,
+        clickHouse);
+  }
+
+  private static StoreObservation observeRedis(
+      String redisUri, String runId, String ruleId, int actors, int eventsPerActor)
+      throws Exception {
+    RedisClient redis = RedisClient.create(redisUri);
+    try (var connection = redis.connect()) {
+      var commands = connection.sync();
+      List<String> keys = commands.keys("safety:risk:actor:load-" + runId + "-*");
+      Set<String> distinctActors = new LinkedHashSet<>();
+      List<String> canonicalRecords = new ArrayList<>();
+      int payloads = 0;
+      int mismatches = 0;
+      for (String key : keys) {
+        String payload = commands.hget(key, "payload");
+        if (payload == null) {
+          mismatches++;
+          continue;
+        }
+        payloads++;
+        JsonNode value = JSON.readTree(payload);
+        String actorId = value.path("actor_id").asText();
+        distinctActors.add(actorId);
+        ResultFields actual =
+            new ResultFields(
+                value.path("signal_id").asText(),
+                actorId,
+                value.path("triggering_event_id").asText(),
+                value.path("rule_id").asText(),
+                value.path("risk_score").asInt(),
+                value.path("observed_event_count").asLong(),
+                value.path("observed_severity_sum").asLong());
+        ResultFields expected = expectedResult(runId, ruleId, actorId, actors, eventsPerActor);
+        if (!actual.equals(expected)) mismatches++;
+        canonicalRecords.add(actual.canonical());
+      }
+      return new StoreObservation(
+          keys.size(), distinctActors.size(), payloads, mismatches, checksum(canonicalRecords));
+    } finally {
+      redis.shutdown();
+    }
+  }
+
+  private static StoreObservation observeClickHouse(
+      String runId, String ruleId, int actors, int eventsPerActor) throws Exception {
+    Set<String> distinctActors = new LinkedHashSet<>();
+    List<String> canonicalRecords = new ArrayList<>();
+    int rowsObserved = 0;
+    int mismatches = 0;
+    try (var connection =
+            DriverManager.getConnection(
+                CLICKHOUSE.getJdbcUrl(), CLICKHOUSE.getUsername(), CLICKHOUSE.getPassword());
+        var statement = connection.createStatement();
+        var rows =
+            statement.executeQuery(
+                "SELECT signal_id,actor_id,triggering_event_id,rule_id,risk_score,observed_event_count,observed_severity_sum FROM risk_signals FINAL WHERE rule_id='"
+                    + ruleId
+                    + "'")) {
+      while (rows.next()) {
+        rowsObserved++;
+        ResultFields actual =
+            new ResultFields(
+                rows.getString(1),
+                rows.getString(2),
+                rows.getString(3),
+                rows.getString(4),
+                rows.getInt(5),
+                rows.getLong(6),
+                rows.getLong(7));
+        distinctActors.add(actual.actorId());
+        ResultFields expected =
+            expectedResult(runId, ruleId, actual.actorId(), actors, eventsPerActor);
+        if (!actual.equals(expected)) mismatches++;
+        canonicalRecords.add(actual.canonical());
+      }
+    }
+    return new StoreObservation(
+        rowsObserved, distinctActors.size(), rowsObserved, mismatches, checksum(canonicalRecords));
+  }
+
+  private static ResultFields expectedResult(
+      String runId, String ruleId, String actorId, int actors, int eventsPerActor) {
+    String actorPrefix = "load-" + runId + "-";
+    if (!actorId.startsWith(actorPrefix)) return ResultFields.invalid(actorId);
+    int actorIndex;
+    try {
+      actorIndex = Integer.parseInt(actorId.substring(actorPrefix.length()));
+    } catch (NumberFormatException ignored) {
+      return ResultFields.invalid(actorId);
+    }
+    if (actorIndex < 0 || actorIndex >= actors) return ResultFields.invalid(actorId);
+    String triggeringEventId = "load-" + runId + "-" + (actorIndex + (eventsPerActor - 1) * actors);
+    String signalId =
+        UUID.nameUUIDFromBytes((triggeringEventId + ":" + ruleId).getBytes(StandardCharsets.UTF_8))
+            .toString();
+    return new ResultFields(
+        signalId, actorId, triggeringEventId, ruleId, 90, eventsPerActor, eventsPerActor);
+  }
+
+  private static String expectedResultChecksum(
+      String runId, String ruleId, int events, int actors, int eventsPerActor) {
+    assertThat(events).isEqualTo(actors * eventsPerActor);
+    List<String> records = new ArrayList<>(actors);
+    for (int actor = 0; actor < actors; actor++)
+      records.add(
+          expectedResult(runId, ruleId, "load-" + runId + "-" + actor, actors, eventsPerActor)
+              .canonical());
+    return checksum(records);
+  }
+
+  private static void assertObservedStore(
+      StoreObservation observation, int actors, String expectedChecksum) {
+    assertThat(observation.records()).isEqualTo(actors);
+    assertThat(observation.distinctActors()).isEqualTo(actors);
+    assertThat(observation.payloads()).isEqualTo(actors);
+    assertThat(observation.recordsWithFieldMismatch()).isZero();
+    assertThat(observation.checksumSha256()).isEqualTo(expectedChecksum);
+  }
+
+  private static String checksum(List<String> records) {
+    try {
+      MessageDigest digest = MessageDigest.getInstance("SHA-256");
+      records.stream()
+          .sorted()
+          .forEach(record -> digest.update((record + "\n").getBytes(StandardCharsets.UTF_8)));
+      return HexFormat.of().formatHex(digest.digest());
+    } catch (java.security.NoSuchAlgorithmException impossible) {
+      throw new IllegalStateException("SHA-256 unavailable", impossible);
+    }
+  }
+
+  private static Map<String, Object> runStatistics(List<LoadRun> runs) {
+    Map<String, Object> statistics = new LinkedHashMap<>();
+    statistics.put(
+        "elapsed_seconds", statistics(runs.stream().map(LoadRun::elapsedSeconds).toList()));
+    statistics.put(
+        "events_per_second", statistics(runs.stream().map(LoadRun::eventsPerSecond).toList()));
+    return statistics;
+  }
+
+  private static Map<String, Object> startupDecomposition(
+      int smallEvents, int largeEvents, List<LoadRun> smallRuns, List<LoadRun> largeRuns) {
+    Map<String, LoadRun> smallByPair =
+        smallRuns.stream()
+            .collect(
+                java.util.stream.Collectors.toMap(
+                    run -> Integer.toString(run.measuredPair()), run -> run));
+    Map<String, LoadRun> largeByPair =
+        largeRuns.stream()
+            .collect(
+                java.util.stream.Collectors.toMap(
+                    run -> Integer.toString(run.measuredPair()), run -> run));
+    List<Double> pairedRates = new ArrayList<>();
+    List<Double> pairedStartups = new ArrayList<>();
+    List<Map<String, Object>> pairs = new ArrayList<>();
+    for (int pair = 1; pair <= smallRuns.size(); pair++) {
+      LoadRun small = smallByPair.get(Integer.toString(pair));
+      LoadRun large = largeByPair.get(Integer.toString(pair));
+      double deltaSeconds = large.elapsedSeconds() - small.elapsedSeconds();
+      Map<String, Object> observation = new LinkedHashMap<>();
+      observation.put("measured_pair", pair);
+      observation.put("small_elapsed_seconds", round(small.elapsedSeconds()));
+      observation.put("large_elapsed_seconds", round(large.elapsedSeconds()));
+      observation.put("valid_positive_elapsed_delta", deltaSeconds > 0);
+      if (deltaSeconds > 0) {
+        double rate = (largeEvents - smallEvents) / deltaSeconds;
+        double startup = small.elapsedSeconds() - smallEvents / rate;
+        pairedRates.add(rate);
+        pairedStartups.add(startup);
+        observation.put("estimated_steady_state_events_per_second", round(rate));
+        observation.put("estimated_startup_seconds", round(startup));
+      }
+      pairs.add(observation);
+    }
+    double medianSmall = median(smallRuns.stream().map(LoadRun::elapsedSeconds).toList());
+    double medianLarge = median(largeRuns.stream().map(LoadRun::elapsedSeconds).toList());
+    double medianDelta = medianLarge - medianSmall;
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("model", "elapsed(N)=startup+N/rate");
+    result.put("assumption", "startup and steady-state rate are stable across paired sizes");
+    result.put("small_median_elapsed_seconds", round(medianSmall));
+    result.put("large_median_elapsed_seconds", round(medianLarge));
+    result.put("valid_positive_median_elapsed_delta", medianDelta > 0);
+    if (medianDelta > 0) {
+      double medianRate = (largeEvents - smallEvents) / medianDelta;
+      result.put("median_based_steady_state_events_per_second", round(medianRate));
+      result.put("median_based_startup_seconds", round(medianSmall - smallEvents / medianRate));
+    }
+    result.put("paired_estimates", pairs);
+    result.put("valid_paired_rate_statistics", statisticsOrNull(pairedRates));
+    result.put("valid_paired_startup_statistics", statisticsOrNull(pairedStartups));
+    return result;
+  }
+
+  private static Map<String, Object> statisticsOrNull(List<Double> values) {
+    return values.isEmpty() ? Map.of("n", 0) : statistics(values);
+  }
+
+  private static Map<String, Object> statistics(List<Double> values) {
+    double[] sorted = values.stream().mapToDouble(Double::doubleValue).sorted().toArray();
+    double mean = Arrays.stream(sorted).average().orElseThrow();
+    double squared = Arrays.stream(sorted).map(value -> (value - mean) * (value - mean)).sum();
+    double sampleStandardDeviation =
+        sorted.length > 1 ? Math.sqrt(squared / (sorted.length - 1)) : 0;
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("n", sorted.length);
+    result.put("mean", round(mean));
+    result.put("median", round(median(Arrays.stream(sorted).boxed().toList())));
+    result.put("sample_standard_deviation", round(sampleStandardDeviation));
+    result.put(
+        "coefficient_of_variation_percent",
+        round(mean == 0 ? 0 : sampleStandardDeviation / mean * 100));
+    result.put("min", round(sorted[0]));
+    result.put("max", round(sorted[sorted.length - 1]));
+    return result;
+  }
+
+  private static double median(List<Double> values) {
+    double[] sorted = values.stream().mapToDouble(Double::doubleValue).sorted().toArray();
+    int middle = sorted.length / 2;
+    return sorted.length % 2 == 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
+  }
+
+  private record ResultFields(
+      String signalId,
+      String actorId,
+      String triggeringEventId,
+      String ruleId,
+      int riskScore,
+      long observedEventCount,
+      long observedSeveritySum) {
+    private static ResultFields invalid(String actorId) {
+      return new ResultFields("", actorId, "", "", -1, -1, -1);
+    }
+
+    private String canonical() {
+      return String.join(
+          "|",
+          signalId,
+          actorId,
+          triggeringEventId,
+          ruleId,
+          Integer.toString(riskScore),
+          Long.toString(observedEventCount),
+          Long.toString(observedSeveritySum));
+    }
+  }
+
+  private record StoreObservation(
+      int records,
+      int distinctActors,
+      int payloads,
+      int recordsWithFieldMismatch,
+      String checksumSha256) {
+    private Map<String, Object> asMap() {
+      Map<String, Object> result = new LinkedHashMap<>();
+      result.put("observed_records", records);
+      result.put("observed_distinct_actors", distinctActors);
+      result.put("observed_payloads", payloads);
+      result.put("observed_records_with_field_mismatch", recordsWithFieldMismatch);
+      result.put("observed_checksum_sha256", checksumSha256);
+      return result;
+    }
+  }
+
+  private record LoadRun(
+      String runId,
+      int pair,
+      int measuredPair,
+      boolean warmup,
+      int orderInPair,
+      int events,
+      int actors,
+      double elapsedSeconds,
+      double eventsPerSecond,
+      String expectedChecksumSha256,
+      StoreObservation redis,
+      StoreObservation clickHouse) {
+    private Map<String, Object> asMap() {
+      Map<String, Object> result = new LinkedHashMap<>();
+      result.put("run_id", runId);
+      result.put("pair", pair);
+      result.put("measured_pair", warmup ? null : measuredPair);
+      result.put("warmup_excluded", warmup);
+      result.put("order_in_pair", orderInPair);
+      result.put("events", events);
+      result.put("actors", actors);
+      result.put("elapsed_seconds", round(elapsedSeconds));
+      result.put("events_per_second", round(eventsPerSecond));
+      result.put("expected_result_checksum_sha256", expectedChecksumSha256);
+      result.put("redis_observation", redis.asMap());
+      result.put("clickhouse_observation", clickHouse.asMap());
+      return result;
+    }
   }
 
   private static List<QuarantinedEvent> consumeQuarantine(String topic, int expected)
@@ -465,15 +814,15 @@ class EndToEndPipelineIT {
     }
   }
 
-  private static void produceLoad(List<String> topics, int trial, int events, int actors) {
+  private static void produceLoad(List<String> topics, String runId, int events, int actors) {
     Properties p = new Properties();
     p.put("bootstrap.servers", KAFKA.getBootstrapServers());
     p.put("key.serializer", ByteArraySerializer.class.getName());
     p.put("value.serializer", ByteArraySerializer.class.getName());
     try (var producer = new KafkaProducer<byte[], byte[]>(p)) {
       for (int i = 0; i < events; i++) {
-        String actor = "load-" + trial + "-" + (i % actors);
-        String payload = eventForActor("load-" + trial + "-" + i, actor, i, 1);
+        String actor = "load-" + runId + "-" + (i % actors);
+        String payload = eventForActor("load-" + runId + "-" + i, actor, i, 1);
         producer.send(
             new ProducerRecord<>(
                 topics.get(i % topics.size()),
@@ -532,9 +881,10 @@ class EndToEndPipelineIT {
     return value;
   }
 
-  private static double percentile(double[] sorted, double quantile) {
-    int index = Math.max(0, (int) Math.ceil(quantile * sorted.length) - 1);
-    return sorted[index];
+  private static int nonNegativeProperty(String name, int defaultValue) {
+    int value = Integer.parseInt(System.getProperty(name, Integer.toString(defaultValue)));
+    if (value < 0) throw new IllegalArgumentException(name + " must not be negative");
+    return value;
   }
 
   private static double round(double value) {

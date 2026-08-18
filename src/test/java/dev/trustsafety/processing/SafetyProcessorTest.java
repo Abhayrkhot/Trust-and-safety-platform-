@@ -61,6 +61,36 @@ class SafetyProcessorTest {
   }
 
   @Test
+  void reEmitsAfterThresholdWithUpdatedAggregates() throws Exception {
+    var processor =
+        new SafetyProcessor(List.of(new RuleConfig("r1", 60_000, 2, 0, 75)), 86_400_000);
+    var harness =
+        new KeyedOneInputStreamOperatorTestHarness<>(
+            new KeyedProcessOperator<>(processor), SafetyEvent::actorId, Types.STRING);
+    try {
+      harness.open();
+      harness.processElement(new StreamRecord<>(event("e1", 0, 10)));
+      harness.processElement(new StreamRecord<>(event("e2", 1_000, 20)));
+      harness.processElement(new StreamRecord<>(event("e3", 2_000, 30)));
+
+      assertThat(harness.extractOutputValues())
+          .satisfiesExactly(
+              signal -> {
+                assertThat(signal.triggeringEventId()).isEqualTo("e2");
+                assertThat(signal.observedEventCount()).isEqualTo(2);
+                assertThat(signal.observedSeveritySum()).isEqualTo(30);
+              },
+              signal -> {
+                assertThat(signal.triggeringEventId()).isEqualTo("e3");
+                assertThat(signal.observedEventCount()).isEqualTo(3);
+                assertThat(signal.observedSeveritySum()).isEqualTo(60);
+              });
+    } finally {
+      harness.close();
+    }
+  }
+
+  @Test
   void excludesEventsOutsideWindow() throws Exception {
     var processor = new SafetyProcessor(List.of(new RuleConfig("r1", 1_000, 2, 1, 50)), 10_000);
     var harness =
