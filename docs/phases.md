@@ -1,0 +1,22 @@
+# Delivery Phases
+
+## Phase 1 — Contracts and ingestion
+
+- Versioned safety-event schema and strict JSON codec
+- Kafka source with committed offsets and strict malformed-record rejection
+- Validation tests for required fields, enum values, versions, and timestamps
+
+## Phase 2 — Stateful event-time evaluation (next)
+
+- Bounded-out-of-orderness watermarks with idle partitions
+- Keyed TTL `event_id` deduplication
+- Rolling actor event/severity counts
+- Configurable rules producing explainable risk signals
+- Checkpoint configuration and deterministic operator tests
+
+## Later phases (not yet claimed)
+
+- Redis hot-state and ClickHouse historical sinks with delivery-semantics tests
+- Failure injection and restart correctness
+- Prometheus lag/throughput/latency metrics
+- Backpressure/load testing and a time-bounded, assertion-bearing soak test
