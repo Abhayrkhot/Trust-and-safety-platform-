@@ -9,9 +9,9 @@ if [[ -x /opt/homebrew/opt/openjdk@17/bin/java ]]; then
   export PATH="$JAVA_HOME/bin:$PATH"
 fi
 
-events="${1:-10000}"
+events="${1:-60000}"
 iterations="${2:-3}"
-actors="${3:-1000}"
+actors="${3:-6000}"
 revision="$(git rev-parse HEAD)"
 mvn --batch-mode --no-transfer-progress test-compile failsafe:integration-test failsafe:verify \
   -Dit.test='EndToEndPipelineIT#benchmarksBackloggedKafkaThroughFlinkIntoBothServingStores' \
