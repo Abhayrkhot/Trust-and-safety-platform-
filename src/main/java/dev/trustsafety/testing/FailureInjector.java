@@ -1,7 +1,5 @@
 package dev.trustsafety.testing;
 
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.functions.RichMapFunction;
 
@@ -9,10 +7,10 @@ import org.apache.flink.api.common.functions.RichMapFunction;
 public final class FailureInjector<T> extends RichMapFunction<T, T> {
   private static final long serialVersionUID = 1L;
 
-  private static final Set<String> FIRED = ConcurrentHashMap.newKeySet();
   private final String injectionId;
   private final long failAfter;
   private long seen;
+  private int attemptNumber;
 
   public FailureInjector(String injectionId, long failAfter) {
     if (injectionId == null || injectionId.isBlank() || failAfter <= 0)
@@ -24,18 +22,19 @@ public final class FailureInjector<T> extends RichMapFunction<T, T> {
   @Override
   public void open(OpenContext ignored) {
     seen = 0;
+    attemptNumber = getRuntimeContext().getAttemptNumber();
   }
 
   @Override
   public T map(T value) {
     seen++;
-    if (seen == failAfter && FIRED.add(injectionId))
+    if (shouldInject(seen, failAfter, attemptNumber))
       throw new InjectedFailureException(injectionId, failAfter);
     return value;
   }
 
-  public static void reset(String injectionId) {
-    FIRED.remove(injectionId);
+  static boolean shouldInject(long seen, long failAfter, int attemptNumber) {
+    return attemptNumber == 0 && seen == failAfter;
   }
 
   public static final class InjectedFailureException extends RuntimeException {

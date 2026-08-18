@@ -12,7 +12,7 @@ This file is the source of truth for public claims. A claim stays unverified unt
 | Redis hot state atomically preserves the newest event-time signal, is replay-idempotent, and has a configured TTL. | `RedisHotStateStoreIT`; `./verify-all.sh` | Verified 2026-08-18 |
 | ClickHouse persists historical risk signals and collapses replayed stable signal IDs in `FINAL` reads. | `ClickHouseHistoricalStoreIT`; `./verify-all.sh` | Verified 2026-08-18 |
 | Both external sinks provide at-least-once delivery under Flink replay; no exactly-once sink claim is made. | `RiskSignalSinkTest`, sink implementation; `./verify-all.sh` | Verified 2026-08-18 |
-| An opt-in fail-once operator causes a real local Flink restart and the bounded job completes with all 100 unique records. | `FailureRecoveryIT`; `./verify-all.sh` | Verified 2026-08-18 |
+| An opt-in fail-once operator fails only execution attempt zero, causes a real local Flink restart, and the bounded job completes with all 100 unique records. | `FailureInjectorTest`, `FailureRecoveryIT`; `./verify-all.sh` | Verified 2026-08-18 |
 | Flink metrics expose input throughput/count, duplicates, emitted signals, event-time lag, and processing-latency histogram quantiles suitable for Prometheus export. | `SafetyMetricsTest`, `conf/flink-conf.yaml`; `./verify-all.sh` | Verified 2026-08-18 |
 | A serial 1 ms/event sink applies measurable backpressure and the job still drains exactly 1,000 unique signals. | `BackpressureIT`; `./verify-all.sh` | Verified 2026-08-18 |
 | A 22,000-input soak (20,000 unique plus 2,000 duplicates, with deterministic out-of-order arrivals) completes within 30 seconds and produces exactly 20,000 unique signals. | `SoakIT`; `./verify-all.sh` | Verified 2026-08-18 |
@@ -20,8 +20,9 @@ This file is the source of truth for public claims. A claim stays unverified unt
 | A finite Kafka stream runs through the production Flink graph and writes one deduplicated risk signal to both Redis and ClickHouse with matching rule/count fields. | `EndToEndPipelineIT`; `./verify-all.sh` | Verified 2026-08-18 |
 | Strict V1 and V2 schemas coexist; V1 events normalize default tenant/trace values while V2 requires tenant identity and supports trace correlation. | schema files, `SafetyEventJsonTest`, `SchemaContractTest`; `./verify-all.sh` | Verified 2026-08-18 |
 | Safety rules load from strict external JSON, reject duplicate/unknown/invalid configuration, and filter by event type and attributes. | `RuleConfigLoaderTest`, `SafetyProcessorTest`; `./verify-all.sh` | Verified 2026-08-18 |
-| The clean gate enforces formatting, maximum-effort SpotBugs, at least 70% combined line coverage, and a runnable dependency-complete JAR entry point. | Maven configuration, `verify-all.sh`; local and CI results | Verified locally 2026-08-18; remote check pending |
-| GitHub rejects newly introduced high-severity vulnerable dependencies and runs CodeQL for Java. | `.github/workflows/security.yml`; GitHub checks | Pending remote checks |
+| The clean gate enforces formatting, maximum-effort SpotBugs, at least 70% combined line coverage, and a runnable dependency-complete JAR entry point. | Maven configuration, `verify-all.sh`; local and CI results | Verified locally and on GitHub 2026-08-18 |
+| GitHub rejects newly introduced high-severity vulnerable dependencies and runs CodeQL for Java. | `.github/workflows/security.yml`; GitHub checks | Verified on GitHub 2026-08-18 |
+| Production configuration fails closed without an explicit absolute checkpoint URI and applies validated exactly-once, externalized-checkpoint, timeout, concurrency, and bounded-restart settings. Deployment operators remain responsible for choosing a durable backend supported by their Flink installation. | `RuntimeConfigTest`, `SafetyStreamJobTest`; `./verify-all.sh` | Verified 2026-08-18 |
 ## Verification runs
 
 - 2026-08-18 Phase 1: `./verify-all.sh` — PASS in the full Phase 1–2 workspace. Phase-specific branch verification is recorded in its PR. This is correctness evidence only, not a performance measurement.
@@ -32,7 +33,8 @@ This file is the source of truth for public claims. A claim stays unverified unt
 - 2026-08-18 local load harness: 50,000 events, 500 actors, parallelism 4, 1.383560 seconds, 36,138.65 events/s; Java 26.0.2, macOS arm64, 10 available processors. Embedded collection source and discard sink only.
 - 2026-08-18 Phase 6: `./verify-all.sh` — PASS; 17 unit tests plus 6 integration tests, 0 failures, 0 errors, 0 skipped. The end-to-end test used Apache Kafka 3.8, Redis 8.2, ClickHouse 25.8, the production Flink evaluation graph, and exact assertions in both stores.
 - 2026-08-18 Phase 7: `./verify-all.sh` — PASS; 25 unit/contract tests plus 6 integration tests, 0 failures, 0 errors, 0 skipped. Published Draft 2020-12 V1/V2 schemas are validated by an independent JSON Schema engine and cross-version rejection tests.
-- 2026-08-18 Phase 8 local gate: `./verify-all.sh` — PASS on Java 17.0.20; 25 unit/contract tests plus 6 integration tests, 0 failures, 0 errors, 0 skipped; maximum-effort SpotBugs reported 0 findings; combined production line coverage was 334/405 (82.47%); the dependency-complete application JAR passed archive, manifest, and launch smoke checks. GitHub-hosted CodeQL and dependency-review results remain pending until the phase PR runs.
+- 2026-08-18 Phase 8: `./verify-all.sh` — PASS on Java 17.0.20; 25 unit/contract tests plus 6 integration tests, 0 failures, 0 errors, 0 skipped; maximum-effort SpotBugs reported 0 findings; combined production line coverage was 334/405 (82.47%); the dependency-complete application JAR passed archive, manifest, and launch smoke checks. GitHub clean verification, dependency review, and CodeQL all passed on PR #8.
+- 2026-08-18 Phase 9 local gate: `./verify-all.sh` — PASS on Java 17.0.20; 29 unit/contract tests plus 6 integration tests, 0 failures, 0 errors, 0 skipped; maximum-effort SpotBugs reported 0 findings; production line coverage was 406/480 (84.58%) and branch coverage was 159/232 (68.53%). The failure-recovery integration passed with execution-attempt-aware injection.
 
 ## Baseline (2026-08-18)
 

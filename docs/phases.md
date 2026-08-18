@@ -20,8 +20,6 @@
 - ClickHouse historical storage uses stable signal IDs for replay deduplication
 - Container-backed integration tests exercise both real databases
 
-## Later phases (not yet claimed)
-
 ## Phase 4 — Recovery and observability
 
 - Opt-in deterministic fail-once injection and an embedded recovery integration test
@@ -54,3 +52,10 @@
 - Combined unit and integration line-coverage minimum
 - Runnable shaded application JAR with verified entry point
 - GitHub dependency-review and CodeQL workflows
+
+## Phase 9 — Operational recovery hardening
+
+- Validated runtime configuration with production fail-closed checkpoint storage
+- Durable externalized-checkpoint settings and bounded restart policy
+- Execution-attempt-aware failure injection that survives JVM replacement
+- Recovery and incident-response runbook with explicit delivery semantics

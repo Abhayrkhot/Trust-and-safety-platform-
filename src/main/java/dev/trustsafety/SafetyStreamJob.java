@@ -1,5 +1,6 @@
 package dev.trustsafety;
 
+import dev.trustsafety.config.RuntimeConfig;
 import dev.trustsafety.model.RiskSignal;
 import dev.trustsafety.model.SafetyEvent;
 import dev.trustsafety.processing.SafetyProcessor;
@@ -10,7 +11,6 @@ import dev.trustsafety.sink.ClickHouseHistoricalStore;
 import dev.trustsafety.sink.RedisHotStateStore;
 import dev.trustsafety.sink.RiskSignalSink;
 import dev.trustsafety.testing.FailureInjector;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -19,6 +19,7 @@ import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 
@@ -36,20 +37,42 @@ public final class SafetyStreamJob {
 
   public static DataStream<RiskSignal> buildEvaluationPipeline(
       StreamExecutionEnvironment env, KafkaSource<SafetyEvent> source, List<RuleConfig> rules) {
+    return buildEvaluationPipeline(env, source, rules, null);
+  }
+
+  public static DataStream<RiskSignal> buildEvaluationPipeline(
+      StreamExecutionEnvironment env,
+      KafkaSource<SafetyEvent> source,
+      List<RuleConfig> rules,
+      Long failAfterEvents) {
     var events =
         env.fromSource(source, watermarkStrategy(), "safety-events-kafka")
             .uid("safety-events-kafka-v1");
-    String failAfter = System.getenv("SAFETY_FAIL_AFTER_EVENTS");
-    if (failAfter != null && !failAfter.isBlank())
+    if (failAfterEvents != null)
       events =
           events
-              .map(new FailureInjector<>("configured-drill", Long.parseLong(failAfter)))
+              .map(new FailureInjector<>("configured-drill", failAfterEvents))
               .name("failure-injection")
               .uid("failure-injection-v1");
     return events
         .keyBy(SafetyEvent::actorId)
         .process(new SafetyProcessor(rules, Duration.ofHours(24).toMillis()))
         .uid("safety-rules-v1");
+  }
+
+  public static void configureReliability(StreamExecutionEnvironment env, RuntimeConfig config) {
+    env.enableCheckpointing(config.checkpointInterval().toMillis(), CheckpointingMode.EXACTLY_ONCE);
+    CheckpointConfig checkpoints = env.getCheckpointConfig();
+    checkpoints.setCheckpointTimeout(config.checkpointTimeout().toMillis());
+    checkpoints.setMinPauseBetweenCheckpoints(config.checkpointMinPause().toMillis());
+    checkpoints.setMaxConcurrentCheckpoints(1);
+    checkpoints.setTolerableCheckpointFailureNumber(0);
+    checkpoints.enableExternalizedCheckpoints(
+        CheckpointConfig.ExternalizedCheckpointCleanup.RETAIN_ON_CANCELLATION);
+    config.checkpointUri().ifPresent(checkpoints::setCheckpointStorage);
+    env.setRestartStrategy(
+        RestartStrategies.fixedDelayRestart(
+            config.restartAttempts(), config.restartDelay().toMillis()));
   }
 
   public static void attachServingSinks(
@@ -81,10 +104,9 @@ public final class SafetyStreamJob {
       return;
     }
     if (args.length != 5) throw new IllegalArgumentException(USAGE);
+    RuntimeConfig config = RuntimeConfig.fromEnvironment(System.getenv());
     StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-    env.enableCheckpointing(30_000, CheckpointingMode.EXACTLY_ONCE);
-    env.getCheckpointConfig().setMinPauseBetweenCheckpoints(10_000);
-    env.setRestartStrategy(RestartStrategies.fixedDelayRestart(3, 5_000));
+    configureReliability(env, config);
     KafkaSource<SafetyEvent> source =
         KafkaSource.<SafetyEvent>builder()
             .setBootstrapServers(args[0])
@@ -93,10 +115,9 @@ public final class SafetyStreamJob {
             .setStartingOffsets(OffsetsInitializer.committedOffsets(OffsetResetStrategy.EARLIEST))
             .setDeserializer(new SafetyEventDeserializer())
             .build();
-    Path rulesPath =
-        Path.of(System.getenv().getOrDefault("SAFETY_RULES_PATH", "conf/safety-rules.json"));
-    List<RuleConfig> rules = RuleConfigLoader.load(rulesPath);
-    var signals = buildEvaluationPipeline(env, source, rules);
+    List<RuleConfig> rules = RuleConfigLoader.load(config.rulesPath());
+    var signals =
+        buildEvaluationPipeline(env, source, rules, config.failureAfterEvents().orElse(null));
     attachServingSinks(
         signals,
         args[3],

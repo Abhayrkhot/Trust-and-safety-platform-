@@ -14,7 +14,6 @@ class FailureRecoveryIT {
   @Test
   void boundedJobRestartsAfterInjectedFailureAndReachesCompleteUniqueResult() throws Exception {
     String id = "recovery-it";
-    FailureInjector.reset(id);
     RecordingSink.reset();
     StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
     env.setParallelism(1);

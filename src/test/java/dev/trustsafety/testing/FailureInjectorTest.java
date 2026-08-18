@@ -6,19 +6,12 @@ import org.junit.jupiter.api.Test;
 
 class FailureInjectorTest {
   @Test
-  void firesOnlyOnceAcrossOperatorRecreation() throws Exception {
-    String id = "unit-fail-once";
-    FailureInjector.reset(id);
-    var first = new FailureInjector<Integer>(id, 2);
-    first.open((org.apache.flink.api.common.functions.OpenContext) null);
-    assertThat(first.map(1)).isEqualTo(1);
-    assertThatThrownBy(() -> first.map(2))
-        .isInstanceOf(FailureInjector.InjectedFailureException.class)
-        .hasMessageContaining(id);
-    var restarted = new FailureInjector<Integer>(id, 2);
-    restarted.open((org.apache.flink.api.common.functions.OpenContext) null);
-    assertThat(restarted.map(1)).isEqualTo(1);
-    assertThat(restarted.map(2)).isEqualTo(2);
+  void onlyInitialExecutionAttemptInjectsAtConfiguredRecord() {
+    assertThat(FailureInjector.shouldInject(1, 2, 0)).isFalse();
+    assertThat(FailureInjector.shouldInject(2, 2, 0)).isTrue();
+    assertThat(FailureInjector.shouldInject(3, 2, 0)).isFalse();
+    assertThat(FailureInjector.shouldInject(2, 2, 1)).isFalse();
+    assertThat(FailureInjector.shouldInject(2, 2, 7)).isFalse();
   }
 
   @Test
