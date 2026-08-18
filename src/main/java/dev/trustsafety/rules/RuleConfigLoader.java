@@ -65,8 +65,8 @@ public final class RuleConfigLoader {
       if (attrs != null) {
         if (!attrs.isObject()) throw new IOException("required_attributes must be an object");
         attrs
-            .fields()
-            .forEachRemaining(
+            .properties()
+            .forEach(
                 e -> {
                   if (!e.getValue().isTextual())
                     throw new IllegalArgumentException("required attribute values must be strings");

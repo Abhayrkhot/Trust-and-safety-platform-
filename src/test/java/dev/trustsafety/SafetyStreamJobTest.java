@@ -13,10 +13,11 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
+import org.apache.flink.configuration.CheckpointingOptions;
+import org.apache.flink.configuration.ExternalizedCheckpointRetention;
+import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
-import org.apache.flink.runtime.state.storage.FileSystemCheckpointStorage;
 import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Test;
@@ -63,21 +64,19 @@ class SafetyStreamJobTest {
     assertThat(checkpoints.getMinPauseBetweenCheckpoints()).isEqualTo(4_000);
     assertThat(checkpoints.getMaxConcurrentCheckpoints()).isOne();
     assertThat(checkpoints.getTolerableCheckpointFailureNumber()).isZero();
-    assertThat(checkpoints.getExternalizedCheckpointCleanup())
-        .isEqualTo(CheckpointConfig.ExternalizedCheckpointCleanup.RETAIN_ON_CANCELLATION);
-    assertThat(checkpoints.getCheckpointStorage())
-        .isInstanceOfSatisfying(
-            FileSystemCheckpointStorage.class,
-            storage ->
-                assertThat(storage.getCheckpointPath().toString())
-                    .isEqualTo("file:/tmp/safety-checkpoints"));
-    assertThat(env.getConfig().getRestartStrategy())
-        .isInstanceOfSatisfying(
-            RestartStrategies.FixedDelayRestartStrategyConfiguration.class,
-            restart -> {
-              assertThat(restart.getRestartAttempts()).isEqualTo(4);
-              assertThat(restart.getDurationBetweenAttempts()).isEqualTo(Duration.ofSeconds(3));
-            });
+    assertThat(checkpoints.getExternalizedCheckpointRetention())
+        .isEqualTo(ExternalizedCheckpointRetention.RETAIN_ON_CANCELLATION);
+    assertThat(env.getConfiguration().get(CheckpointingOptions.CHECKPOINTS_DIRECTORY).toString())
+        .isEqualTo("file:///tmp/safety-checkpoints");
+    assertThat(env.getConfiguration().get(RestartStrategyOptions.RESTART_STRATEGY))
+        .isEqualTo("fixed-delay");
+    assertThat(
+            env.getConfiguration()
+                .get(RestartStrategyOptions.RESTART_STRATEGY_FIXED_DELAY_ATTEMPTS))
+        .isEqualTo(4);
+    assertThat(
+            env.getConfiguration().get(RestartStrategyOptions.RESTART_STRATEGY_FIXED_DELAY_DELAY))
+        .isEqualTo(Duration.ofSeconds(3));
   }
 
   @Test

@@ -33,7 +33,7 @@ public final class LocalLoadBenchmark {
             .toList();
     StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
     env.setParallelism(Math.min(4, Runtime.getRuntime().availableProcessors()));
-    env.fromCollection(input)
+    env.fromData(input)
         .keyBy(SafetyEvent::actorId)
         .process(
             new SafetyProcessor(

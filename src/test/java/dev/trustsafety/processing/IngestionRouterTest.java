@@ -18,9 +18,10 @@ class IngestionRouterTest {
   void routesAcceptedAndQuarantinedOutcomesWithoutDroppingEither() throws Exception {
     SafetyEvent event = event();
     var quarantine = QuarantinedEventJsonTest.event();
-    try (var harness =
+    var harness =
         new OneInputStreamOperatorTestHarness<IngestedSafetyRecord, SafetyEvent>(
-            new ProcessOperator<>(new IngestionRouter()))) {
+            new ProcessOperator<>(new IngestionRouter()));
+    try {
       harness.open();
       harness.processElement(new StreamRecord<>(IngestedSafetyRecord.accepted(event)));
       harness.processElement(new StreamRecord<>(IngestedSafetyRecord.rejected(quarantine)));
@@ -28,6 +29,8 @@ class IngestionRouterTest {
       assertThat(harness.getSideOutput(IngestionRouter.QUARANTINE))
           .extracting(StreamRecord::getValue)
           .containsExactly(quarantine);
+    } finally {
+      harness.close();
     }
   }
 

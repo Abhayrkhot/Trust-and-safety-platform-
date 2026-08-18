@@ -82,3 +82,10 @@
 - Local filesystem checkpoints with an asserted successful-checkpoint accumulator
 - Exact post-restart convergence assertions in Redis and ClickHouse
 - Exact distinct quarantine identity assertions with honest at-least-once duplicate handling
+
+## Phase 13 — Compiler and API-drift hygiene
+
+- Java compiler warnings fail both production and test compilation
+- Deprecated Flink and Jackson APIs migrated to their supported replacements
+- Test harnesses close explicitly so interrupt-capable cleanup is visible
+- Formatting recursively covers Java, Markdown, JSON, and YAML while excluding generated output

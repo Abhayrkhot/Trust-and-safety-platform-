@@ -9,7 +9,7 @@ Kafka -> strict V1/V2 decode -> valid -> event-time watermarks -> keyed TTL dedu
                               \-> poison -> versioned Kafka quarantine topic
 ```
 
-The implementation includes checkpoint restore tests, a real Kafka-to-databases recovery/replay drill, deterministic failure injection, load/backpressure/soak gates, strict schema contracts, and security/coverage CI. Every public claim is tied to reproducible evidence in [docs/claims-and-evidence.md](docs/claims-and-evidence.md).
+The implementation includes checkpoint restore tests, a real Kafka-to-databases recovery/replay drill, deterministic failure injection, load/backpressure/soak gates, strict schema contracts, warnings-as-errors compilation, and security/coverage CI. Every public claim is tied to reproducible evidence in [docs/claims-and-evidence.md](docs/claims-and-evidence.md).
 
 The clean build also emits a schema-validated CycloneDX runtime SBOM at `target/bom.json`. Dependabot covers Maven and GitHub Actions, while dependency review rejects newly introduced moderate-or-higher vulnerabilities.
 
