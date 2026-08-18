@@ -34,6 +34,7 @@ import java.util.UUID;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.clients.producer.KafkaProducer;
@@ -353,6 +354,9 @@ class EndToEndPipelineIT {
     result.put(
         "startup_decomposition",
         startupDecomposition(smallEvents, largeEvents, measuredSmall, measuredLarge));
+    result.put(
+        "post_run_cleanup",
+        "run-scoped Redis keys and Kafka topics deleted and ClickHouse benchmark table truncated after oracle validation; cleanup excluded from timed span");
     result.put("redis_image", "redis:8.2-alpine");
     result.put("clickhouse_image", "clickhouse/clickhouse-server:25.8-alpine");
     result.put("kafka_image", "apache/kafka-native:3.8.0");
@@ -412,6 +416,7 @@ class EndToEndPipelineIT {
     assertObservedStore(redis, actors, expectedChecksum);
     assertObservedStore(clickHouse, actors, expectedChecksum);
     assertThat(redis.checksumSha256()).isEqualTo(clickHouse.checksumSha256());
+    cleanupLoadRun(redisUri, topics, runId);
     return new LoadRun(
         runId,
         pair,
@@ -425,6 +430,28 @@ class EndToEndPipelineIT {
         expectedChecksum,
         redis,
         clickHouse);
+  }
+
+  private static void cleanupLoadRun(String redisUri, List<String> topics, String runId)
+      throws Exception {
+    RedisClient redis = RedisClient.create(redisUri);
+    try (var connection = redis.connect()) {
+      List<String> keys = connection.sync().keys("safety:risk:actor:load-" + runId + "-*");
+      if (!keys.isEmpty()) connection.sync().del(keys.toArray(String[]::new));
+    } finally {
+      redis.shutdown();
+    }
+    try (var connection =
+            DriverManager.getConnection(
+                CLICKHOUSE.getJdbcUrl(), CLICKHOUSE.getUsername(), CLICKHOUSE.getPassword());
+        var statement = connection.createStatement()) {
+      statement.execute("TRUNCATE TABLE risk_signals");
+    }
+    Properties adminProperties = new Properties();
+    adminProperties.put("bootstrap.servers", KAFKA.getBootstrapServers());
+    try (Admin admin = Admin.create(adminProperties)) {
+      admin.deleteTopics(topics).all().get();
+    }
   }
 
   private static StoreObservation observeRedis(
@@ -562,7 +589,63 @@ class EndToEndPipelineIT {
         "elapsed_seconds", statistics(runs.stream().map(LoadRun::elapsedSeconds).toList()));
     statistics.put(
         "events_per_second", statistics(runs.stream().map(LoadRun::eventsPerSecond).toList()));
+    Map<String, Object> orderStatistics = new LinkedHashMap<>();
+    for (int order = 1; order <= 2; order++) {
+      int position = order;
+      orderStatistics.put(
+          Integer.toString(order),
+          statisticsOrNull(
+              runs.stream()
+                  .filter(run -> run.orderInPair() == position)
+                  .map(LoadRun::eventsPerSecond)
+                  .toList()));
+    }
+    statistics.put("events_per_second_by_order_in_pair", orderStatistics);
+    statistics.put("sequence_drift", sequenceDrift(runs));
     return statistics;
+  }
+
+  private static Map<String, Object> sequenceDrift(List<LoadRun> runs) {
+    List<LoadRun> ordered =
+        runs.stream().sorted(Comparator.comparingInt(LoadRun::measuredPair)).toList();
+    int split = ordered.size() / 2;
+    Map<String, Object> result = new LinkedHashMap<>();
+    if (split == 0) {
+      result.put("n", ordered.size());
+      return result;
+    }
+    double firstHalfMean =
+        ordered.subList(0, split).stream()
+            .mapToDouble(LoadRun::eventsPerSecond)
+            .average()
+            .orElseThrow();
+    double secondHalfMean =
+        ordered.subList(split, ordered.size()).stream()
+            .mapToDouble(LoadRun::eventsPerSecond)
+            .average()
+            .orElseThrow();
+    double meanPair = ordered.stream().mapToInt(LoadRun::measuredPair).average().orElseThrow();
+    double meanThroughput =
+        ordered.stream().mapToDouble(LoadRun::eventsPerSecond).average().orElseThrow();
+    double numerator =
+        ordered.stream()
+            .mapToDouble(
+                run -> (run.measuredPair() - meanPair) * (run.eventsPerSecond() - meanThroughput))
+            .sum();
+    double denominator =
+        ordered.stream()
+            .mapToDouble(run -> (run.measuredPair() - meanPair) * (run.measuredPair() - meanPair))
+            .sum();
+    result.put("n", ordered.size());
+    result.put("first_half_mean_events_per_second", round(firstHalfMean));
+    result.put("second_half_mean_events_per_second", round(secondHalfMean));
+    result.put(
+        "second_half_vs_first_half_percent",
+        round(firstHalfMean == 0 ? 0 : (secondHalfMean - firstHalfMean) / firstHalfMean * 100));
+    result.put(
+        "linear_slope_events_per_second_per_measured_pair",
+        round(denominator == 0 ? 0 : numerator / denominator));
+    return result;
   }
 
   private static Map<String, Object> startupDecomposition(
