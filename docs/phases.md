@@ -28,4 +28,9 @@
 - Prometheus reporter configuration
 - Throughput, duplicates, risk-signal, event-time-lag, and processing-latency distribution metrics
 
-- Backpressure/load testing and a time-bounded, assertion-bearing soak test
+## Phase 5 — Load, backpressure, and soak
+
+- Slow-sink backpressure test with an exact completion oracle
+- Time-bounded 20,000-unique-event soak with duplicates and out-of-order arrivals
+- Repeatable local benchmark command that emits machine context and raw results
+- GitHub Actions clean verification on every PR

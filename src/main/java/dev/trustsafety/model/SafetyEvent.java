@@ -3,6 +3,8 @@ package dev.trustsafety.model;
 import java.io.Serializable;
 import java.time.Instant;
 import java.util.Map;
+import java.util.HashMap;
+import java.util.Collections;
 import java.util.Objects;
 
 public record SafetyEvent(
@@ -24,8 +26,10 @@ public record SafetyEvent(
     Objects.requireNonNull(occurredAt, "occurred_at"); Objects.requireNonNull(ingestedAt, "ingested_at");
     Objects.requireNonNull(eventType, "event_type");
     if (severity < 0 || severity > 100) throw new IllegalArgumentException("severity must be in [0,100]");
-    attributes = attributes == null ? Map.of() : Map.copyOf(attributes);
+    attributes = attributes == null ? new HashMap<>() : new HashMap<>(attributes);
   }
+
+  @Override public Map<String,String> attributes() { return Collections.unmodifiableMap(attributes); }
 
   private static void requireText(String value, String name) {
     if (value == null || value.isBlank()) throw new IllegalArgumentException(name + " must not be blank");

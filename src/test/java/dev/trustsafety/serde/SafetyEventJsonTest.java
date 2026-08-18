@@ -12,6 +12,7 @@ class SafetyEventJsonTest {
   @Test void rejectsUnknownVersion(){assertThatThrownBy(()->decode(VALID.replace("\"schema_version\":1","\"schema_version\":2"))).hasMessageContaining("unsupported schema_version");}
   @Test void rejectsUnknownFields(){assertThatThrownBy(()->decode(VALID.replace("}",",\"surprise\":true}"))).hasMessageContaining("unknown field");}
   @Test void rejectsOutOfRangeSeverity(){assertThatThrownBy(()->decode(VALID.replace("\"severity\":45","\"severity\":101"))).hasMessageContaining("severity");}
+  @Test void attributesCannotBeMutatedByCallers(){var event=unchecked(VALID);assertThatThrownBy(()->event.attributes().put("new","value")).isInstanceOf(UnsupportedOperationException.class);}
   private static dev.trustsafety.model.SafetyEvent unchecked(String json){try{return decode(json);}catch(Exception e){throw new AssertionError(e);}}
   private static dev.trustsafety.model.SafetyEvent decode(String json)throws Exception{return SafetyEventJson.decode(json.getBytes(StandardCharsets.UTF_8));}
 }
