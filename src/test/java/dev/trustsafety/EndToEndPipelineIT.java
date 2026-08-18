@@ -2,6 +2,7 @@ package dev.trustsafety;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.trustsafety.config.RuntimeConfig;
 import dev.trustsafety.model.IngestedSafetyRecord;
 import dev.trustsafety.model.QuarantinedEvent;
@@ -13,13 +14,16 @@ import dev.trustsafety.sink.RedisHotStateStore;
 import dev.trustsafety.testing.FailureInjector;
 import io.lettuce.core.RedisClient;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.DriverManager;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import org.apache.flink.connector.kafka.source.KafkaSource;
@@ -109,7 +113,7 @@ class EndToEndPipelineIT {
         var statement = connection.createStatement();
         var rows =
             statement.executeQuery(
-                "SELECT count(),any(rule_id),any(observed_event_count) FROM risk_signals FINAL")) {
+                "SELECT count(),any(rule_id),any(observed_event_count) FROM risk_signals FINAL WHERE rule_id='e2e-rule'")) {
       assertThat(rows.next()).isTrue();
       assertThat(rows.getLong(1)).isEqualTo(1);
       assertThat(rows.getString(2)).isEqualTo("e2e-rule");
@@ -270,6 +274,104 @@ class EndToEndPipelineIT {
     }
   }
 
+  @Test
+  @Timeout(90)
+  void benchmarksBackloggedKafkaThroughFlinkIntoBothServingStores() throws Exception {
+    int events = positiveProperty("endToEndBenchmarkEvents", 10_000);
+    int actors = positiveProperty("endToEndBenchmarkActors", 1_000);
+    int iterations = positiveProperty("endToEndBenchmarkIterations", 1);
+    if (events % actors != 0)
+      throw new IllegalArgumentException("end-to-end benchmark events must be divisible by actors");
+    int eventsPerActor = events / actors;
+    List<Map<String, Object>> trials = new ArrayList<>();
+    double[] throughput = new double[iterations];
+
+    for (int trial = 0; trial < iterations; trial++) {
+      List<String> topics =
+          List.of(
+              "load-content-" + trial,
+              "load-activity-" + trial,
+              "load-moderation-" + trial,
+              "load-enforcement-" + trial);
+      String ruleId = "load-rule-" + trial;
+      produceLoad(topics, trial, events, actors);
+      StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+      env.setParallelism(4);
+      var signals =
+          SafetyStreamJob.buildEvaluationPipeline(
+              env,
+              source(topics, "load-group-" + trial),
+              List.of(new RuleConfig(ruleId, 60_000, eventsPerActor, eventsPerActor, 90)),
+              ignored -> {});
+      String redisUri = "redis://" + REDIS.getHost() + ":" + REDIS.getMappedPort(6379);
+      SafetyStreamJob.attachServingSinks(
+          signals,
+          redisUri,
+          CLICKHOUSE.getJdbcUrl(),
+          CLICKHOUSE.getUsername(),
+          CLICKHOUSE.getPassword());
+
+      long started = System.nanoTime();
+      env.execute("end-to-end-load-" + trial);
+      long elapsedNanos = System.nanoTime() - started;
+      throughput[trial] = events / (elapsedNanos / 1_000_000_000.0);
+
+      RedisClient redis = RedisClient.create(redisUri);
+      try (var connection = redis.connect()) {
+        assertThat(connection.sync().keys("safety:risk:actor:load-" + trial + "-*"))
+            .hasSize(actors);
+      } finally {
+        redis.shutdown();
+      }
+      try (var connection =
+              DriverManager.getConnection(
+                  CLICKHOUSE.getJdbcUrl(), CLICKHOUSE.getUsername(), CLICKHOUSE.getPassword());
+          var statement = connection.createStatement();
+          var rows =
+              statement.executeQuery(
+                  "SELECT count() FROM risk_signals FINAL WHERE rule_id='" + ruleId + "'")) {
+        assertThat(rows.next()).isTrue();
+        assertThat(rows.getLong(1)).isEqualTo(actors);
+      }
+
+      Map<String, Object> measured = new LinkedHashMap<>();
+      measured.put("trial", trial + 1);
+      measured.put("elapsed_seconds", round(elapsedNanos / 1_000_000_000.0));
+      measured.put("events_per_second", round(throughput[trial]));
+      measured.put("redis_actor_keys", actors);
+      measured.put("clickhouse_final_rows", actors);
+      trials.add(measured);
+    }
+
+    double[] sorted = throughput.clone();
+    java.util.Arrays.sort(sorted);
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("benchmark", "backlogged-kafka-to-serving-stores");
+    result.put("revision", System.getProperty("endToEndBenchmarkRevision", "unspecified"));
+    result.put("events_per_trial", events);
+    result.put("actors", actors);
+    result.put("events_per_actor", eventsPerActor);
+    result.put("kafka_topics", 4);
+    result.put("flink_parallelism", 4);
+    result.put("risk_signals_per_trial", actors);
+    result.put("iterations", iterations);
+    result.put("trials", trials);
+    result.put("median_events_per_second", round(percentile(sorted, 0.50)));
+    result.put("redis_image", "redis:8.2-alpine");
+    result.put("clickhouse_image", "clickhouse/clickhouse-server:25.8-alpine");
+    result.put("kafka_image", "apache/kafka-native:3.8.0");
+    result.put("java_version", System.getProperty("java.version"));
+    result.put("os", System.getProperty("os.name") + " " + System.getProperty("os.arch"));
+    result.put("available_processors", Runtime.getRuntime().availableProcessors());
+    result.put(
+        "scope",
+        "local preloaded Kafka backlog through Flink and synchronous Redis/ClickHouse sinks; producer time excluded, job startup included");
+    Path output = Path.of("target", "benchmark-results", "end-to-end-load.json");
+    Files.createDirectories(output.getParent());
+    new ObjectMapper().writerWithDefaultPrettyPrinter().writeValue(output.toFile(), result);
+    System.out.println(new ObjectMapper().writeValueAsString(result));
+  }
+
   private static List<QuarantinedEvent> consumeQuarantine(String topic, int expected)
       throws Exception {
     Properties p = new Properties();
@@ -363,6 +465,25 @@ class EndToEndPipelineIT {
     }
   }
 
+  private static void produceLoad(List<String> topics, int trial, int events, int actors) {
+    Properties p = new Properties();
+    p.put("bootstrap.servers", KAFKA.getBootstrapServers());
+    p.put("key.serializer", ByteArraySerializer.class.getName());
+    p.put("value.serializer", ByteArraySerializer.class.getName());
+    try (var producer = new KafkaProducer<byte[], byte[]>(p)) {
+      for (int i = 0; i < events; i++) {
+        String actor = "load-" + trial + "-" + (i % actors);
+        String payload = eventForActor("load-" + trial + "-" + i, actor, i, 1);
+        producer.send(
+            new ProducerRecord<>(
+                topics.get(i % topics.size()),
+                actor.getBytes(StandardCharsets.UTF_8),
+                payload.getBytes(StandardCharsets.UTF_8)));
+      }
+      producer.flush();
+    }
+  }
+
   private static KafkaSource<IngestedSafetyRecord> source(String topic, String groupId) {
     return source(List.of(topic), groupId);
   }
@@ -403,5 +524,20 @@ class EndToEndPipelineIT {
         + "\",\"event_type\":\"POLICY_MATCH\",\"severity\":"
         + severity
         + "}";
+  }
+
+  private static int positiveProperty(String name, int defaultValue) {
+    int value = Integer.parseInt(System.getProperty(name, Integer.toString(defaultValue)));
+    if (value <= 0) throw new IllegalArgumentException(name + " must be positive");
+    return value;
+  }
+
+  private static double percentile(double[] sorted, double quantile) {
+    int index = Math.max(0, (int) Math.ceil(quantile * sorted.length) - 1);
+    return sorted[index];
+  }
+
+  private static double round(double value) {
+    return Math.round(value * 1_000.0) / 1_000.0;
   }
 }
