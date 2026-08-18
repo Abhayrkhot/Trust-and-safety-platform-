@@ -1,0 +1,13 @@
+{
+  "rules": [
+    {
+      "rule_id": "burst-severity-v1",
+      "window_ms": 60000,
+      "minimum_events": 3,
+      "minimum_severity_sum": 120,
+      "risk_score": 80,
+      "event_types": ["CONTENT_REPORT", "POLICY_MATCH"],
+      "required_attributes": {}
+    }
+  ]
+}

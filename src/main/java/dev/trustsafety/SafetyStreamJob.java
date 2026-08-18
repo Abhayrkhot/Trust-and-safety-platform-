@@ -4,6 +4,8 @@ import dev.trustsafety.model.SafetyEvent;
 import dev.trustsafety.model.RiskSignal;
 import dev.trustsafety.processing.SafetyProcessor;
 import dev.trustsafety.rules.RuleConfig;
+import dev.trustsafety.rules.RuleConfigLoader;
+import java.nio.file.Path;
 import dev.trustsafety.serde.SafetyEventDeserializer;
 import dev.trustsafety.sink.ClickHouseHistoricalStore;
 import dev.trustsafety.sink.RedisHotStateStore;
@@ -47,7 +49,7 @@ public final class SafetyStreamJob {
     KafkaSource<SafetyEvent> source=KafkaSource.<SafetyEvent>builder().setBootstrapServers(args[0]).setTopics(args[1]).setGroupId(args[2])
         .setStartingOffsets(OffsetsInitializer.committedOffsets(OffsetResetStrategy.EARLIEST))
         .setDeserializer(new SafetyEventDeserializer()).build();
-    List<RuleConfig> rules=List.of(new RuleConfig("burst-severity-v1",60_000,3,120,80));
+    Path rulesPath=Path.of(System.getenv().getOrDefault("SAFETY_RULES_PATH","conf/safety-rules.json"));List<RuleConfig> rules=RuleConfigLoader.load(rulesPath);
     var signals=buildEvaluationPipeline(env,source,rules);attachServingSinks(signals,args[3],args[4],System.getenv().getOrDefault("CLICKHOUSE_USER","default"),System.getenv().getOrDefault("CLICKHOUSE_PASSWORD",""));
     env.execute("trust-and-safety-event-processing");
   }

@@ -46,5 +46,11 @@ class SafetyProcessorTest {
       harness.processElement(new StreamRecord<>(event("newest",11_000,10))); assertThat(harness.extractOutputValues()).hasSize(1);
     }
   }
+  @Test void ruleFiltersEventTypeAndRequiredAttributes() throws Exception {
+    var rule=new RuleConfig("filtered",60_000,2,1,50,java.util.Set.of(SafetyEvent.EventType.CONTENT_REPORT),Map.of("region","us"));
+    try(var harness=new KeyedOneInputStreamOperatorTestHarness<>(new KeyedProcessOperator<>(new SafetyProcessor(List.of(rule),10_000)),SafetyEvent::actorId,Types.STRING)){
+      harness.open();harness.processElement(new StreamRecord<>(event("wrong-type",0,10)));harness.processElement(new StreamRecord<>(new SafetyEvent(1,"match-1",Instant.ofEpochMilli(1),Instant.ofEpochMilli(1),"actor",null,SafetyEvent.EventType.CONTENT_REPORT,10,Map.of("region","us"))));harness.processElement(new StreamRecord<>(new SafetyEvent(1,"wrong-attribute",Instant.ofEpochMilli(2),Instant.ofEpochMilli(2),"actor",null,SafetyEvent.EventType.CONTENT_REPORT,10,Map.of("region","eu"))));assertThat(harness.extractOutputValues()).isEmpty();harness.processElement(new StreamRecord<>(new SafetyEvent(1,"match-2",Instant.ofEpochMilli(3),Instant.ofEpochMilli(3),"actor",null,SafetyEvent.EventType.CONTENT_REPORT,10,Map.of("region","us"))));assertThat(harness.extractOutputValues()).hasSize(1);
+    }
+  }
   private static SafetyEvent event(String id,long millis,int severity){return new SafetyEvent(1,id,Instant.ofEpochMilli(millis),Instant.ofEpochMilli(millis),"actor",null,SafetyEvent.EventType.POLICY_MATCH,severity,Map.of());}
 }

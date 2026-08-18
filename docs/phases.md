@@ -40,3 +40,9 @@
 - Finite-offset Kafka source drives the real Flink evaluation graph
 - The same run asserts exact Redis hot state and ClickHouse historical rows
 - Duplicate Kafka event IDs are verified across the complete path
+
+## Phase 7 — Schema evolution and policy configuration
+
+- Strict V1 and V2 JSON schemas; V1 normalizes into the current internal model
+- V2 adds required tenant identity and optional trace correlation without breaking V1 producers
+- Rules load from validated JSON and support event-type plus attribute predicates

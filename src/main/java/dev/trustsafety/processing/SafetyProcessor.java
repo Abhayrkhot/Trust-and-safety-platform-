@@ -49,8 +49,8 @@ public final class SafetyProcessor extends KeyedProcessFunction<String, SafetyEv
     List<SafetyEvent> retained=new ArrayList<>();
     for(SafetyEvent prior:history.get()) if(prior.occurredAt().toEpochMilli()>=cutoff && prior.occurredAt().toEpochMilli()<=windowEnd) retained.add(prior);
     if(eventTime>=cutoff) retained.add(event); history.update(retained);
-    for(RuleConfig rule:rules){ long ruleCutoff=windowEnd-rule.windowMillis(); long count=0,severity=0;
-      for(SafetyEvent candidate:retained) if(candidate.occurredAt().toEpochMilli()>=ruleCutoff && candidate.occurredAt().toEpochMilli()<=windowEnd){count++;severity+=candidate.severity();}
+    for(RuleConfig rule:rules){ if(!rule.matches(event))continue;long ruleCutoff=windowEnd-rule.windowMillis(); long count=0,severity=0;
+      for(SafetyEvent candidate:retained) if(rule.matches(candidate)&&candidate.occurredAt().toEpochMilli()>=ruleCutoff && candidate.occurredAt().toEpochMilli()<=windowEnd){count++;severity+=candidate.severity();}
       if(count>=rule.minimumEvents() && severity>=rule.minimumSeveritySum()) { metrics.onSignal(); out.collect(new RiskSignal(
           UUID.nameUUIDFromBytes((event.eventId()+":"+rule.ruleId()).getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString(),
           event.actorId(),event.eventId(),rule.ruleId(),rule.riskScore(),"events="+count+", severity_sum="+severity,count,severity,Instant.ofEpochMilli(windowEnd))); }
