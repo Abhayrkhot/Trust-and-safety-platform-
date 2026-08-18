@@ -1,6 +1,7 @@
 package dev.trustsafety;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.trustsafety.config.RuntimeConfig;
 import dev.trustsafety.model.IngestedSafetyRecord;
@@ -23,6 +24,21 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Test;
 
 class SafetyStreamJobTest {
+  @Test
+  void parsesUniqueMultiTopicInputAndRejectsAmbiguity() {
+    assertThat(SafetyStreamJob.parseTopics("content-events, activity-events,moderation-events"))
+        .containsExactly("content-events", "activity-events", "moderation-events");
+    assertThatThrownBy(() -> SafetyStreamJob.parseTopics("content-events,"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("blank");
+    assertThatThrownBy(() -> SafetyStreamJob.parseTopics("content-events,content-events"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("unique");
+    assertThatThrownBy(() -> SafetyStreamJob.parseTopics(" "))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("at least one");
+  }
+
   @Test
   void watermarkUsesOccurredAt() {
     var e =

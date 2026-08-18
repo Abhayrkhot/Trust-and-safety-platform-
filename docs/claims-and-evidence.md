@@ -6,6 +6,7 @@ This file is the source of truth for public claims. A claim stays unverified unt
 |---|---|---|
 | V1 safety events are strictly validated and unknown schema versions are rejected. | `SafetyEventJsonTest`; `./verify-all.sh` | Verified 2026-08-18 |
 | Kafka ingestion classifies null payloads, malformed JSON, unsupported versions, and contract violations without dropping them or blocking valid records; poison records are sent to a versioned quarantine topic. | `SafetyEventDeserializerTest`, `QuarantinedEventJsonTest`, `EndToEndPipelineIT`; `./verify-all.sh` | Verified 2026-08-18 |
+| One validated Kafka source accepts multiple unique topics. In a real parallelism-3 run, content, activity, and moderation topic records for one actor converge into shared keyed state and produce exactly one three-event risk signal in both Redis and ClickHouse. This is multi-topic/partition evidence, not a multi-node cluster performance claim. | `SafetyStreamJobTest`, `EndToEndPipelineIT`; `./verify-all.sh` | Verified 2026-08-18 |
 | Event-time processing uses bounded out-of-orderness and idleness detection. | `SafetyStreamJobTest`; `./verify-all.sh` | Verified 2026-08-18 |
 | Duplicate `event_id` values are suppressed per actor with state TTL and restored from checkpoints. | `SafetyProcessorTest`; `./verify-all.sh` | Verified 2026-08-18 |
 | Rules are configuration-driven and emit explainable risk signals from keyed rolling state without losing newer history on late arrivals. | `SafetyProcessorTest`; `./verify-all.sh` | Verified 2026-08-18 |
@@ -53,6 +54,7 @@ This file is the source of truth for public claims. A claim stays unverified unt
 - 2026-08-18 Phase 14 local gate: `./verify-all.sh` — PASS on Java 17.0.20; 45 unit/contract tests plus 7 integration tests, 0 failures, 0 errors, 0 skipped; maximum-effort SpotBugs reported 0 findings; production line coverage was 688/780 (88.21%) and branch coverage was 247/344 (71.80%). Tests cover cap/rule cross-validation, deterministic out-of-order eviction, operational breach signals and metrics, idle-key event-time cleanup, beyond-retention arrivals, and checkpoint-restored cleanup timers.
 - 2026-08-18 Phase 14 remote gate: PR #14 clean verification, moderate-threshold dependency review, CodeQL analysis, and CodeQL status checks all passed.
 - 2026-08-18 Phase 15 local gate: `./verify-all.sh` — PASS on Java 17.0.20; 45 unit/contract tests plus 8 integration tests, 0 failures, 0 errors, 0 skipped; maximum-effort SpotBugs reported 0 findings; production line coverage remained 688/780 (88.21%) and branch coverage remained 247/344 (71.80%). The added real-Kafka integration observed exact connector offset lag 4 and then 0 after drain.
+- 2026-08-18 Phase 16 local gate: `./verify-all.sh` — PASS on Java 17.0.20; 46 unit/contract tests plus 9 integration tests, 0 failures, 0 errors, 0 skipped; maximum-effort SpotBugs reported 0 findings; production line coverage was 696/789 (88.21%) and branch coverage was 254/352 (72.16%). A parallelism-3 real-Kafka run combined three distinct topic streams into one actor-keyed rule result and asserted exact Redis and ClickHouse outcomes.
 
 ## Baseline (2026-08-18)
 

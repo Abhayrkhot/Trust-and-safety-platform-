@@ -7,13 +7,15 @@
 3. Confirm Kafka topic, Redis, ClickHouse, and Prometheus connectivity from the Flink runtime.
 4. Confirm the checkpoint filesystem plugin and credentials for the configured URI.
 
+The job's second CLI argument accepts one topic or a comma-separated list such as `content-events,activity-events,moderation-events`. Topic names are trimmed and must be nonblank and unique. With multiple inputs, set `SAFETY_QUARANTINE_TOPIC` explicitly unless the first-topic-derived default is intentionally shared.
+
 ## Required production settings
 
 - `SAFETY_ENVIRONMENT=production`
 - `SAFETY_CHECKPOINT_URI`: absolute durable URI such as an installation-supported S3 or HDFS path
 - `SAFETY_RULES_PATH`: mounted strict JSON rule configuration
 - `CLICKHOUSE_USER` and `CLICKHOUSE_PASSWORD`
-- `SAFETY_QUARANTINE_TOPIC`: dedicated restricted-access topic; defaults to `<input-topic>.quarantine`
+- `SAFETY_QUARANTINE_TOPIC`: dedicated restricted-access topic; defaults to `<first-configured-input-topic>.quarantine`
 
 Optional tuning settings are `SAFETY_CHECKPOINT_INTERVAL_MS`, `SAFETY_CHECKPOINT_TIMEOUT_MS`, `SAFETY_CHECKPOINT_MIN_PAUSE_MS`, `SAFETY_RESTART_ATTEMPTS`, `SAFETY_RESTART_DELAY_MS`, and `SAFETY_MAX_HISTORY_EVENTS_PER_ACTOR`. Values are parsed and cross-validated at startup. The history cap defaults to 100,000 events per actor and must be at least every configured rule's `minimum_events`; tune it from measured per-key rates and window sizes, not from the default alone. Production mode fails closed without an explicit absolute checkpoint URI; operators must ensure that the selected backend is durable for their deployment.
 
