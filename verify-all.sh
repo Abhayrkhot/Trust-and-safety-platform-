@@ -9,7 +9,7 @@ if [[ -x /opt/homebrew/opt/openjdk@17/bin/java ]]; then
   export PATH="$JAVA_HOME/bin:$PATH"
 fi
 
-bash -n verify-all.sh scripts/run-local-load-benchmark.sh
+bash -n verify-all.sh scripts/run-local-load-benchmark.sh scripts/run-serving-query-benchmark.sh
 mvn --batch-mode --no-transfer-progress -Dmaven.repo.local="$repo_dir/.m2" clean verify
 test -f docs/claims-and-evidence.md
 test -f target/site/jacoco/index.html

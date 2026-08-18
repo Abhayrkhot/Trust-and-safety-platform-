@@ -31,7 +31,7 @@ public final class ClickHouseHistoricalStore implements RiskSignalStore {
           signal_id String, actor_id String, triggering_event_id String, rule_id LowCardinality(String),
           risk_score UInt8, reason String, observed_event_count UInt64, observed_severity_sum UInt64,
           emitted_at DateTime64(3, 'UTC'), stored_at DateTime64(3, 'UTC') DEFAULT now64(3)
-        ) ENGINE = ReplacingMergeTree(stored_at) ORDER BY signal_id
+        ) ENGINE = ReplacingMergeTree(stored_at) ORDER BY (actor_id, emitted_at, signal_id)
         """);
       }
       insert =
