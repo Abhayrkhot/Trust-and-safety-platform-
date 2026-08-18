@@ -118,3 +118,12 @@
 - Reproducible real Redis/ClickHouse warm-query harness with response validation
 - Fixed dataset, warm-up count, sample count, revision, containers, and machine metadata
 - Raw p50/p95/p99/max evidence with no invented latency threshold
+
+## Phase 18 — Real end-to-end load evidence
+
+- Preloaded backlogs distributed across four real Kafka topics
+- Production Flink evaluation graph at parallelism four
+- Synchronous Redis and ClickHouse sinks included in the timed region
+- Exact per-trial Redis-key and ClickHouse-row correctness oracles
+- Revision, dataset, container images, machine context, and all trial results retained
+- No production-capacity claim or pass/fail throughput threshold
