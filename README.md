@@ -10,6 +10,8 @@ Kafka -> strict V1/V2 decode -> event-time watermarks -> keyed TTL dedup
 
 The implementation includes checkpoint restore tests, a real Kafka-to-databases integration path, deterministic failure injection, load/backpressure/soak gates, strict schema contracts, and security/coverage CI. Every public claim is tied to reproducible evidence in [docs/claims-and-evidence.md](docs/claims-and-evidence.md).
 
+The clean build also emits a schema-validated CycloneDX runtime SBOM at `target/bom.json`. Dependabot covers Maven and GitHub Actions, while dependency review rejects newly introduced moderate-or-higher vulnerabilities.
+
 Delivery semantics are explicit: Flink state and Kafka offsets use exactly-once checkpoints; the synchronous external sinks are at-least-once and make replay idempotent with stable signal IDs and event-time ordering. No end-to-end exactly-once or production throughput claim is made.
 
 ## Verify
