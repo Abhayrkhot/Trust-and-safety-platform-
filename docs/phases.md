@@ -74,3 +74,11 @@
 - Bounded payload preview plus complete-payload SHA-256 evidence
 - At-least-once Kafka quarantine sink and accepted/quarantined Prometheus counters
 - Exact real-Kafka integration assertions across quarantine, Redis, and ClickHouse
+
+## Phase 12 — Full-infrastructure recovery and replay
+
+- Real Kafka workload with 3,002 valid records and 6 poison records
+- Deterministic failure on initial execution attempt after valid record 1,500
+- Local filesystem checkpoints with an asserted successful-checkpoint accumulator
+- Exact post-restart convergence assertions in Redis and ClickHouse
+- Exact distinct quarantine identity assertions with honest at-least-once duplicate handling

@@ -21,4 +21,10 @@ class FailureInjectorTest {
     assertThatThrownBy(() -> new FailureInjector<>("x", 0))
         .isInstanceOf(IllegalArgumentException.class);
   }
+
+  @Test
+  void scopesCheckpointEvidenceToTheNamedDrill() {
+    assertThat(FailureInjector.checkpointAccumulator("recovery"))
+        .isEqualTo("failure_injector.recovery.completed_checkpoints");
+  }
 }
