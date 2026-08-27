@@ -2,21 +2,29 @@ package dev.trustsafety;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import dev.trustsafety.model.SafetyEvent;
+import dev.trustsafety.model.IngestedSafetyRecord;
+import dev.trustsafety.model.QuarantinedEvent;
 import dev.trustsafety.rules.RuleConfig;
+import dev.trustsafety.serde.QuarantinedEventJson;
+import dev.trustsafety.serde.SafetyEventDecodingException.Reason;
 import dev.trustsafety.serde.SafetyEventDeserializer;
 import dev.trustsafety.sink.RedisHotStateStore;
 import io.lettuce.core.RedisClient;
 import java.nio.charset.StandardCharsets;
 import java.sql.DriverManager;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Properties;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.clickhouse.ClickHouseContainer;
@@ -39,11 +47,20 @@ class EndToEndPipelineIT {
       new ClickHouseContainer(DockerImageName.parse("clickhouse/clickhouse-server:25.8-alpine"));
 
   @Test
-  void kafkaRecordsFlowThroughFlinkIntoBothServingStoresWithDeduplication() throws Exception {
+  void validAndPoisonKafkaRecordsReachTheirExactDestinations() throws Exception {
     String topic = "safety-e2e";
-    produce(topic, event("e1", 40, 0), event("e1", 40, 0), event("e2", 40, 1), event("e3", 40, 2));
-    KafkaSource<SafetyEvent> source =
-        KafkaSource.<SafetyEvent>builder()
+    String quarantineTopic = "safety-e2e-quarantine";
+    produce(
+        topic,
+        event("e1", 40, 0),
+        "not-json",
+        event("e1", 40, 0),
+        "{\"schema_version\":99}",
+        event("e2", 40, 1),
+        event("e-invalid", 40, 1).replace("}", ",\"unexpected\":true}"),
+        event("e3", 40, 2));
+    KafkaSource<IngestedSafetyRecord> source =
+        KafkaSource.<IngestedSafetyRecord>builder()
             .setBootstrapServers(KAFKA.getBootstrapServers())
             .setTopics(topic)
             .setGroupId("e2e-group")
@@ -55,7 +72,12 @@ class EndToEndPipelineIT {
     env.setParallelism(1);
     var signals =
         SafetyStreamJob.buildEvaluationPipeline(
-            env, source, List.of(new RuleConfig("e2e-rule", 60_000, 3, 120, 90)));
+            env,
+            source,
+            List.of(new RuleConfig("e2e-rule", 60_000, 3, 120, 90)),
+            quarantined ->
+                SafetyStreamJob.attachQuarantineSink(
+                    quarantined, KAFKA.getBootstrapServers(), quarantineTopic));
     String redisUri = "redis://" + REDIS.getHost() + ":" + REDIS.getMappedPort(6379);
     SafetyStreamJob.attachServingSinks(
         signals,
@@ -86,6 +108,56 @@ class EndToEndPipelineIT {
       assertThat(rows.getString(2)).isEqualTo("e2e-rule");
       assertThat(rows.getLong(3)).isEqualTo(3);
     }
+
+    List<QuarantinedEvent> quarantined = consumeQuarantine(quarantineTopic, 3);
+    assertThat(quarantined).extracting(QuarantinedEvent::sourceOffset).containsExactly(1L, 3L, 5L);
+    assertThat(quarantined)
+        .extracting(QuarantinedEvent::failureReason)
+        .containsExactly(
+            Reason.MALFORMED_JSON, Reason.UNSUPPORTED_SCHEMA_VERSION, Reason.CONTRACT_VIOLATION);
+    assertThat(quarantined)
+        .allSatisfy(
+            record -> {
+              assertThat(record.sourceTopic()).isEqualTo(topic);
+              assertThat(record.sourcePartition()).isZero();
+              assertThat(record.quarantineId()).isEqualTo(topic + ":0:" + record.sourceOffset());
+              assertThat(record.payloadSha256()).hasSize(64);
+            });
+  }
+
+  private static List<QuarantinedEvent> consumeQuarantine(String topic, int expected)
+      throws Exception {
+    Properties p = new Properties();
+    p.put("bootstrap.servers", KAFKA.getBootstrapServers());
+    p.put("group.id", "quarantine-verifier");
+    p.put("auto.offset.reset", "earliest");
+    p.put("enable.auto.commit", "false");
+    p.put("key.deserializer", ByteArrayDeserializer.class.getName());
+    p.put("value.deserializer", ByteArrayDeserializer.class.getName());
+    List<QuarantinedEvent> output = new ArrayList<>();
+    try (var consumer = new KafkaConsumer<byte[], byte[]>(p)) {
+      consumer.subscribe(List.of(topic));
+      long deadline = System.nanoTime() + Duration.ofSeconds(15).toNanos();
+      while (output.size() < expected && System.nanoTime() < deadline) {
+        consumer
+            .poll(Duration.ofMillis(250))
+            .forEach(
+                record -> {
+                  try {
+                    QuarantinedEvent decoded = QuarantinedEventJson.decode(record.value());
+                    assertThat(new String(record.key(), StandardCharsets.UTF_8))
+                        .isEqualTo(decoded.quarantineId());
+                    output.add(decoded);
+                  } catch (java.io.IOException e) {
+                    throw new IllegalStateException(e);
+                  }
+                });
+      }
+      consumer.poll(Duration.ofMillis(500)).forEach(ignored -> output.add(null));
+    }
+    assertThat(output).hasSize(expected).doesNotContainNull();
+    output.sort(Comparator.comparingLong(QuarantinedEvent::sourceOffset));
+    return output;
   }
 
   private static void produce(String topic, String... payloads) {

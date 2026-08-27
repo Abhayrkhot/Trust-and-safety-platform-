@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.networknt.schema.Schema;
 import com.networknt.schema.SchemaRegistry;
 import com.networknt.schema.dialect.Draft202012;
@@ -35,6 +36,18 @@ class SchemaContractTest {
         .isNotEmpty();
     assertThat(v2.validate(JSON.readTree(payload(2, true).replace("}", ",\"unknown\":true}"))))
         .isNotEmpty();
+  }
+
+  @Test
+  void publishedQuarantineSchemaMatchesTheStrictCodec() throws Exception {
+    Schema quarantineSchema = schema("schemas/quarantine-event-v1.schema.json");
+    byte[] encoded = QuarantinedEventJson.encode(QuarantinedEventJsonTest.event());
+    JsonNode valid = JSON.readTree(encoded);
+    assertThat(quarantineSchema.validate(valid)).isEmpty();
+    assertThat(QuarantinedEventJson.decode(encoded)).isEqualTo(QuarantinedEventJsonTest.event());
+    ObjectNode invalid = valid.deepCopy();
+    invalid.put("payload_truncated", "no");
+    assertThat(quarantineSchema.validate(invalid)).isNotEmpty();
   }
 
   private static Schema schema(String path) throws Exception {

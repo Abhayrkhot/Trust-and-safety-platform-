@@ -3,7 +3,10 @@ package dev.trustsafety;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.trustsafety.config.RuntimeConfig;
+import dev.trustsafety.model.IngestedSafetyRecord;
 import dev.trustsafety.model.SafetyEvent;
+import dev.trustsafety.rules.RuleConfig;
+import dev.trustsafety.serde.SafetyEventDeserializer;
 import java.net.URI;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -11,6 +14,8 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
+import org.apache.flink.connector.kafka.source.KafkaSource;
+import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.runtime.state.storage.FileSystemCheckpointStorage;
 import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -73,5 +78,28 @@ class SafetyStreamJobTest {
               assertThat(restart.getRestartAttempts()).isEqualTo(4);
               assertThat(restart.getDurationBetweenAttempts()).isEqualTo(Duration.ofSeconds(3));
             });
+  }
+
+  @Test
+  void preservesStableOperatorUidsAcrossTheIngestionGraph() {
+    StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+    KafkaSource<IngestedSafetyRecord> source =
+        KafkaSource.<IngestedSafetyRecord>builder()
+            .setBootstrapServers("localhost:9092")
+            .setTopics("events")
+            .setGroupId("uid-test")
+            .setStartingOffsets(OffsetsInitializer.earliest())
+            .setDeserializer(new SafetyEventDeserializer())
+            .build();
+    SafetyStreamJob.buildEvaluationPipeline(
+        env, source, java.util.List.of(new RuleConfig("uid-rule", 1_000, 1, 1, 1)), ignored -> {});
+
+    assertThat(env.getStreamGraph().getStreamNodes())
+        .extracting(org.apache.flink.streaming.api.graph.StreamNode::getTransformationUID)
+        .contains(
+            "safety-events-kafka-v1",
+            "validate-and-route-v1",
+            "safety-event-watermarks-v1",
+            "safety-rules-v1");
   }
 }

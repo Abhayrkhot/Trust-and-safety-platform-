@@ -1,20 +1,28 @@
 package dev.trustsafety;
 
 import dev.trustsafety.config.RuntimeConfig;
+import dev.trustsafety.model.IngestedSafetyRecord;
+import dev.trustsafety.model.QuarantinedEvent;
 import dev.trustsafety.model.RiskSignal;
 import dev.trustsafety.model.SafetyEvent;
+import dev.trustsafety.processing.IngestionRouter;
 import dev.trustsafety.processing.SafetyProcessor;
 import dev.trustsafety.rules.RuleConfig;
 import dev.trustsafety.rules.RuleConfigLoader;
 import dev.trustsafety.serde.SafetyEventDeserializer;
 import dev.trustsafety.sink.ClickHouseHistoricalStore;
+import dev.trustsafety.sink.QuarantineKafkaSerializationSchema;
 import dev.trustsafety.sink.RedisHotStateStore;
 import dev.trustsafety.sink.RiskSignalSink;
 import dev.trustsafety.testing.FailureInjector;
 import java.time.Duration;
 import java.util.List;
+import java.util.Objects;
+import java.util.function.Consumer;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
+import org.apache.flink.connector.base.DeliveryGuarantee;
+import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.streaming.api.CheckpointingMode;
@@ -36,24 +44,42 @@ public final class SafetyStreamJob {
   }
 
   public static DataStream<RiskSignal> buildEvaluationPipeline(
-      StreamExecutionEnvironment env, KafkaSource<SafetyEvent> source, List<RuleConfig> rules) {
-    return buildEvaluationPipeline(env, source, rules, null);
+      StreamExecutionEnvironment env,
+      KafkaSource<IngestedSafetyRecord> source,
+      List<RuleConfig> rules,
+      Consumer<DataStream<QuarantinedEvent>> quarantineAttacher) {
+    return buildEvaluationPipeline(env, source, rules, null, quarantineAttacher);
   }
 
   public static DataStream<RiskSignal> buildEvaluationPipeline(
       StreamExecutionEnvironment env,
-      KafkaSource<SafetyEvent> source,
+      KafkaSource<IngestedSafetyRecord> source,
       List<RuleConfig> rules,
-      Long failAfterEvents) {
-    var events =
-        env.fromSource(source, watermarkStrategy(), "safety-events-kafka")
+      Long failAfterEvents,
+      Consumer<DataStream<QuarantinedEvent>> quarantineAttacher) {
+    Objects.requireNonNull(quarantineAttacher, "quarantineAttacher");
+    var ingested =
+        env.fromSource(source, WatermarkStrategy.noWatermarks(), "safety-events-kafka")
             .uid("safety-events-kafka-v1");
-    if (failAfterEvents != null)
+    var routed =
+        ingested
+            .process(new IngestionRouter())
+            .name("validate-and-route")
+            .uid("validate-and-route-v1");
+    DataStream<QuarantinedEvent> quarantined = routed.getSideOutput(IngestionRouter.QUARANTINE);
+    quarantineAttacher.accept(quarantined);
+    DataStream<SafetyEvent> events =
+        routed
+            .assignTimestampsAndWatermarks(watermarkStrategy())
+            .name("safety-event-watermarks")
+            .uid("safety-event-watermarks-v1");
+    if (failAfterEvents != null) {
       events =
           events
               .map(new FailureInjector<>("configured-drill", failAfterEvents))
               .name("failure-injection")
               .uid("failure-injection-v1");
+    }
     return events
         .keyBy(SafetyEvent::actorId)
         .process(new SafetyProcessor(rules, Duration.ofHours(24).toMillis()))
@@ -98,6 +124,17 @@ public final class SafetyStreamJob {
         .uid("clickhouse-history-v1");
   }
 
+  public static void attachQuarantineSink(
+      DataStream<QuarantinedEvent> quarantined, String bootstrapServers, String quarantineTopic) {
+    KafkaSink<QuarantinedEvent> sink =
+        KafkaSink.<QuarantinedEvent>builder()
+            .setBootstrapServers(bootstrapServers)
+            .setRecordSerializer(new QuarantineKafkaSerializationSchema(quarantineTopic))
+            .setDeliveryGuarantee(DeliveryGuarantee.AT_LEAST_ONCE)
+            .build();
+    quarantined.sinkTo(sink).name("quarantine-kafka").uid("quarantine-kafka-v1");
+  }
+
   public static void main(String[] args) throws Exception {
     if (args.length == 1 && "--help".equals(args[0])) {
       System.out.println(USAGE);
@@ -107,8 +144,8 @@ public final class SafetyStreamJob {
     RuntimeConfig config = RuntimeConfig.fromEnvironment(System.getenv());
     StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
     configureReliability(env, config);
-    KafkaSource<SafetyEvent> source =
-        KafkaSource.<SafetyEvent>builder()
+    KafkaSource<IngestedSafetyRecord> source =
+        KafkaSource.<IngestedSafetyRecord>builder()
             .setBootstrapServers(args[0])
             .setTopics(args[1])
             .setGroupId(args[2])
@@ -117,7 +154,17 @@ public final class SafetyStreamJob {
             .build();
     List<RuleConfig> rules = RuleConfigLoader.load(config.rulesPath());
     var signals =
-        buildEvaluationPipeline(env, source, rules, config.failureAfterEvents().orElse(null));
+        buildEvaluationPipeline(
+            env,
+            source,
+            rules,
+            config.failureAfterEvents().orElse(null),
+            quarantined ->
+                attachQuarantineSink(
+                    quarantined,
+                    args[0],
+                    System.getenv()
+                        .getOrDefault("SAFETY_QUARANTINE_TOPIC", args[1] + ".quarantine")));
     attachServingSinks(
         signals,
         args[3],

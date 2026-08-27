@@ -66,3 +66,11 @@
 - Verified CycloneDX application SBOM containing direct and transitive runtime dependencies
 - Weekly automated Maven and GitHub Actions dependency update PRs
 - GitHub vulnerability alerts and moderate-or-higher dependency-review enforcement
+
+## Phase 11 — Poison-event quarantine
+
+- Typed classification for null, malformed, unsupported-version, and contract-invalid Kafka records
+- Versioned quarantine schema with stable source-coordinate identity and Kafka origin metadata
+- Bounded payload preview plus complete-payload SHA-256 evidence
+- At-least-once Kafka quarantine sink and accepted/quarantined Prometheus counters
+- Exact real-Kafka integration assertions across quarantine, Redis, and ClickHouse
