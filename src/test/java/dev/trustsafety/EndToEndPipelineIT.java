@@ -277,8 +277,8 @@ class EndToEndPipelineIT {
   @Test
   @Timeout(90)
   void benchmarksBackloggedKafkaThroughFlinkIntoBothServingStores() throws Exception {
-    int events = positiveProperty("endToEndBenchmarkEvents", 10_000);
-    int actors = positiveProperty("endToEndBenchmarkActors", 1_000);
+    int events = positiveProperty("endToEndBenchmarkEvents", 60_000);
+    int actors = positiveProperty("endToEndBenchmarkActors", 6_000);
     int iterations = positiveProperty("endToEndBenchmarkIterations", 1);
     if (events % actors != 0)
       throw new IllegalArgumentException("end-to-end benchmark events must be divisible by actors");

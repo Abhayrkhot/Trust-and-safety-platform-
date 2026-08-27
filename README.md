@@ -15,7 +15,7 @@ The clean build also emits a schema-validated CycloneDX runtime SBOM at `target/
 
 The revision-matched local warm-query benchmark in [docs/results/serving-query-2026-08-18.json](docs/results/serving-query-2026-08-18.json) measured Redis p95 at 0.433 ms and ClickHouse p95 at 1.609 ms across 300 response-validated queries per store. These are local warm-container round trips, not production or cold-query latency.
 
-The separately scoped real-path load benchmark in [docs/results/end-to-end-load-2026-08-18.json](docs/results/end-to-end-load-2026-08-18.json) measured a 7,149.350 events/s median across three 10,000-event trials. Each trial traversed four real Kafka topics, the production Flink graph at parallelism four, and synchronous Redis and ClickHouse sinks, then asserted exactly 1,000 actor results in both stores. This is local preloaded-backlog evidence, not production capacity; producer time was excluded and Flink startup was included.
+The latest separately scoped real-path load benchmark in [docs/results/end-to-end-load-60k-2026-08-18.json](docs/results/end-to-end-load-60k-2026-08-18.json) measured an 8,626.452 events/s median across three 60,000-event trials. Each trial traversed four real Kafka topics, the production Flink graph at parallelism four, and synchronous Redis and ClickHouse sinks, then asserted exactly 6,000 actor results in both stores. This is local preloaded-backlog evidence, not production capacity; producer time was excluded and Flink startup was included. The earlier 10,000-event raw result remains available for comparison.
 
 Producer-controlled invalid records are classified and quarantined rather than dropped or allowed to block valid traffic. Quarantine records retain Kafka origin, a bounded base64 payload preview, full-payload SHA-256, and a stable source-coordinate key; set `SAFETY_QUARANTINE_TOPIC` to override the default `<first-configured-input-topic>.quarantine` topic.
 
@@ -40,7 +40,7 @@ To reproduce the separately scoped serving-query measurement:
 To reproduce the real Kafka-to-serving-stores load measurement:
 
 ```bash
-./scripts/run-end-to-end-load-benchmark.sh 10000 3 1000
+./scripts/run-end-to-end-load-benchmark.sh 60000 3 6000
 ```
 
 ## Run

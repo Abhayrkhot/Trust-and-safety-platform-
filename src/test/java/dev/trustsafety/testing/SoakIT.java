@@ -15,8 +15,8 @@ class SoakIT {
     assertTimeoutPreemptively(
         Duration.ofSeconds(30),
         () -> {
-          int unique = 20_000;
-          var input = new ArrayList<SafetyEvent>(22_000);
+          int unique = 120_000;
+          var input = new ArrayList<SafetyEvent>(132_000);
           for (int i = 0; i < unique; i++) {
             SafetyEvent event = PipelineTestSupport.event(i, 100);
             input.add(event);
