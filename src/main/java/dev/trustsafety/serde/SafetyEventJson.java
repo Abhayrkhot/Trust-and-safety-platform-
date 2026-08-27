@@ -18,18 +18,22 @@ public final class SafetyEventJson {
   public static SafetyEvent decode(byte[] payload) throws IOException {
     JsonNode n = MAPPER.readTree(payload);
     if (n == null || !n.isObject()) throw new IOException("event must be a JSON object");
-    rejectUnknown(n);
+    int version=requiredInt(n,"schema_version");if(version!=1&&version!=2)throw new IOException("unsupported schema_version: "+version);rejectUnknown(n,version);
     try {
-      return new SafetyEvent(requiredInt(n, "schema_version"), requiredText(n, "event_id"),
+      String eventId=requiredText(n,"event_id");
+      return new SafetyEvent(version, eventId,
           Instant.parse(requiredText(n, "occurred_at")), Instant.parse(requiredText(n, "ingested_at")),
+          version==1?"default":requiredText(n,"tenant_id"),version==1?eventId:optionalText(n,"trace_id"),
           requiredText(n, "actor_id"), optionalText(n, "content_id"),
           SafetyEvent.EventType.valueOf(requiredText(n, "event_type")), requiredInt(n, "severity"),
           attributes(n.get("attributes")));
     } catch (RuntimeException e) { throw new IOException("invalid safety event: " + e.getMessage(), e); }
   }
 
-  private static void rejectUnknown(JsonNode n) throws IOException {
-    var allowed = java.util.Set.of("schema_version","event_id","occurred_at","ingested_at","actor_id","content_id","event_type","severity","attributes");
+  private static void rejectUnknown(JsonNode n,int version) throws IOException {
+    var allowed = version==1
+        ?java.util.Set.of("schema_version","event_id","occurred_at","ingested_at","actor_id","content_id","event_type","severity","attributes")
+        :java.util.Set.of("schema_version","event_id","occurred_at","ingested_at","tenant_id","trace_id","actor_id","content_id","event_type","severity","attributes");
     Iterator<String> fields = n.fieldNames();
     while (fields.hasNext()) { String f = fields.next(); if (!allowed.contains(f)) throw new IOException("unknown field: " + f); }
   }

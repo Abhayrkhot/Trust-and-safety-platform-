@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trust-safety.example/schemas/safety-event-v2.schema.json",
+  "title": "Safety Event V2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "event_id", "occurred_at", "ingested_at", "tenant_id", "actor_id", "event_type", "severity"],
+  "properties": {
+    "schema_version": {"const": 2}, "event_id": {"type": "string", "minLength": 1},
+    "occurred_at": {"type": "string", "format": "date-time"}, "ingested_at": {"type": "string", "format": "date-time"},
+    "tenant_id": {"type": "string", "minLength": 1}, "trace_id": {"type": ["string", "null"]},
+    "actor_id": {"type": "string", "minLength": 1}, "content_id": {"type": ["string", "null"]},
+    "event_type": {"enum": ["CONTENT_REPORT", "POLICY_MATCH", "USER_BLOCK", "MODERATION_DECISION"]},
+    "severity": {"type": "integer", "minimum": 0, "maximum": 100},
+    "attributes": {"type": "object", "additionalProperties": {"type": "string"}}
+  }
+}
