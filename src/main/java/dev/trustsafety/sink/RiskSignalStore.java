@@ -1,9 +1,13 @@
 package dev.trustsafety.sink;
 
 import dev.trustsafety.model.RiskSignal;
+import java.io.IOException;
 
 public interface RiskSignalStore extends AutoCloseable {
-  void write(RiskSignal signal) throws Exception;
-  default void flush() throws Exception {}
-  @Override void close() throws Exception;
+  void write(RiskSignal signal) throws IOException;
+
+  default void flush() throws IOException {}
+
+  @Override
+  void close() throws IOException;
 }

@@ -1,0 +1,27 @@
+{
+  "benchmark" : "warm-serving-query-latency",
+  "revision" : "667281595a014158af8631d76b726be90a43c89f",
+  "actors" : 200,
+  "signals_per_actor" : 10,
+  "total_signals" : 2000,
+  "warmup_queries_per_store" : 50,
+  "measured_queries_per_store" : 300,
+  "redis_image" : "redis:8.2-alpine",
+  "clickhouse_image" : "clickhouse/clickhouse-server:25.8-alpine",
+  "redis_ms" : {
+    "p50" : 0.269,
+    "p95" : 0.433,
+    "p99" : 1.187,
+    "max" : 1.888
+  },
+  "clickhouse_ms" : {
+    "p50" : 1.268,
+    "p95" : 1.609,
+    "p99" : 2.233,
+    "max" : 2.473
+  },
+  "java_version" : "17.0.20",
+  "os" : "Mac OS X aarch64",
+  "available_processors" : 10,
+  "scope" : "local warm cache/container round trips with response validation"
+}

@@ -1,0 +1,42 @@
+{
+  "benchmark": "backlogged-kafka-to-serving-stores",
+  "revision": "732917a44846766c9b4375f36915a5c3c4be13d2",
+  "events_per_trial": 10000,
+  "actors": 1000,
+  "events_per_actor": 10,
+  "kafka_topics": 4,
+  "flink_parallelism": 4,
+  "risk_signals_per_trial": 1000,
+  "iterations": 3,
+  "trials": [
+    {
+      "trial": 1,
+      "elapsed_seconds": 2.364,
+      "events_per_second": 4229.916,
+      "redis_actor_keys": 1000,
+      "clickhouse_final_rows": 1000
+    },
+    {
+      "trial": 2,
+      "elapsed_seconds": 1.192,
+      "events_per_second": 8385.761,
+      "redis_actor_keys": 1000,
+      "clickhouse_final_rows": 1000
+    },
+    {
+      "trial": 3,
+      "elapsed_seconds": 1.399,
+      "events_per_second": 7149.35,
+      "redis_actor_keys": 1000,
+      "clickhouse_final_rows": 1000
+    }
+  ],
+  "median_events_per_second": 7149.35,
+  "redis_image": "redis:8.2-alpine",
+  "clickhouse_image": "clickhouse/clickhouse-server:25.8-alpine",
+  "kafka_image": "apache/kafka-native:3.8.0",
+  "java_version": "17.0.20",
+  "os": "Mac OS X aarch64",
+  "available_processors": 10,
+  "scope": "local preloaded Kafka backlog through Flink and synchronous Redis/ClickHouse sinks; producer time excluded, job startup included"
+}
