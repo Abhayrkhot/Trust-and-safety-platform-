@@ -143,3 +143,15 @@
 - Soak raised from 22,000 to 132,000 inputs with 120,000 unique-result assertions
 - Three revision-matched 60,000-event trials retained alongside the earlier dataset
 - No extrapolation, tuning target, or production-capacity claim
+
+## Phase 21 — Auditable load and adversarial soak evidence
+
+- Redis and ClickHouse observations retained instead of echoing configured actor counts
+- Every observed actor result validated for count, severity sum, score, rule, trigger, and stable ID
+- Independent expected and observed checksums retained for every store and trial
+- Two excluded warm-up pairs followed by ten measured alternating 30,000/60,000-event pairs
+- Raw distribution, order effect, sequence drift, and paired startup-model diagnostics retained
+- Invalid fixed-startup assumptions explicitly rejected when estimates violate necessary conditions
+- Run isolation through post-oracle Redis, ClickHouse, and Kafka cleanup outside the timed span
+- Adversarial soak coverage for hot-key skew, varying duplicate ratios, and retention-boundary arrivals
+- Stateful-rule regression proves correct aggregation on every post-threshold re-emission

@@ -29,7 +29,10 @@ class RedisHotStateStoreIT {
     RedisClient client = RedisClient.create(uri);
     try (var connection = client.connect()) {
       String key = RedisHotStateStore.key("actor");
-      assertThat(connection.sync().hget(key, "payload")).contains("newer").doesNotContain("stale");
+      assertThat(connection.sync().hget(key, "payload"))
+          .contains("newer")
+          .contains("\"triggering_event_id\":\"event\"")
+          .doesNotContain("stale");
       assertThat(connection.sync().pttl(key)).isBetween(1L, 300_000L);
     } finally {
       client.shutdown();

@@ -38,6 +38,7 @@ public final class RedisHotStateStore implements RiskSignalStore {
     Map<String, Object> value = new LinkedHashMap<>();
     value.put("signal_id", signal.signalId());
     value.put("actor_id", signal.actorId());
+    value.put("triggering_event_id", signal.triggeringEventId());
     value.put("rule_id", signal.ruleId());
     value.put("risk_score", signal.riskScore());
     value.put("reason", signal.reason());
