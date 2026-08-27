@@ -2,6 +2,7 @@ package dev.trustsafety.processing;
 
 import dev.trustsafety.model.RiskSignal;
 import dev.trustsafety.model.SafetyEvent;
+import dev.trustsafety.metrics.SafetyMetrics;
 import dev.trustsafety.rules.RuleConfig;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -23,6 +24,7 @@ import org.apache.flink.util.Collector;
 public final class SafetyProcessor extends KeyedProcessFunction<String, SafetyEvent, RiskSignal> {
   private final List<RuleConfig> rules; private final long dedupTtlMillis; private final long maxWindowMillis;
   private transient MapState<String, Boolean> seen; private transient ListState<SafetyEvent> history; private transient ValueState<Long> maxEventTime;
+  private transient SafetyMetrics metrics;
 
   public SafetyProcessor(List<RuleConfig> rules, long dedupTtlMillis) {
     if (rules == null || rules.isEmpty()) throw new IllegalArgumentException("at least one rule is required");
@@ -36,9 +38,11 @@ public final class SafetyProcessor extends KeyedProcessFunction<String, SafetyEv
     seen=getRuntimeContext().getMapState(descriptor);
     history=getRuntimeContext().getListState(new ListStateDescriptor<>("actor-history", TypeInformation.of(SafetyEvent.class)));
     maxEventTime=getRuntimeContext().getState(new ValueStateDescriptor<>("max-event-time",Long.class));
+    metrics=new SafetyMetrics(getRuntimeContext().getMetricGroup());
   }
   @Override public void processElement(SafetyEvent event, Context ctx, Collector<RiskSignal> out) throws Exception {
-    if (seen.contains(event.eventId())) return;
+    metrics.onEvent(event,ctx.timerService().currentProcessingTime());
+    if (seen.contains(event.eventId())) { metrics.onDuplicate(); return; }
     seen.put(event.eventId(), true);
     long eventTime=event.occurredAt().toEpochMilli(); Long previousMax=maxEventTime.value(); long windowEnd=previousMax==null?eventTime:Math.max(previousMax,eventTime);
     maxEventTime.update(windowEnd); long cutoff=windowEnd-maxWindowMillis;
@@ -47,9 +51,9 @@ public final class SafetyProcessor extends KeyedProcessFunction<String, SafetyEv
     if(eventTime>=cutoff) retained.add(event); history.update(retained);
     for(RuleConfig rule:rules){ long ruleCutoff=windowEnd-rule.windowMillis(); long count=0,severity=0;
       for(SafetyEvent candidate:retained) if(candidate.occurredAt().toEpochMilli()>=ruleCutoff && candidate.occurredAt().toEpochMilli()<=windowEnd){count++;severity+=candidate.severity();}
-      if(count>=rule.minimumEvents() && severity>=rule.minimumSeveritySum()) out.collect(new RiskSignal(
+      if(count>=rule.minimumEvents() && severity>=rule.minimumSeveritySum()) { metrics.onSignal(); out.collect(new RiskSignal(
           UUID.nameUUIDFromBytes((event.eventId()+":"+rule.ruleId()).getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString(),
-          event.actorId(),event.eventId(),rule.ruleId(),rule.riskScore(),"events="+count+", severity_sum="+severity,count,severity,Instant.ofEpochMilli(windowEnd)));
+          event.actorId(),event.eventId(),rule.ruleId(),rule.riskScore(),"events="+count+", severity_sum="+severity,count,severity,Instant.ofEpochMilli(windowEnd))); }
     }
   }
 }

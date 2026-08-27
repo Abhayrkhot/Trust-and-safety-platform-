@@ -22,6 +22,10 @@
 
 ## Later phases (not yet claimed)
 
-- Failure injection and restart correctness
-- Prometheus lag/throughput/latency metrics
+## Phase 4 — Recovery and observability
+
+- Opt-in deterministic fail-once injection and an embedded recovery integration test
+- Prometheus reporter configuration
+- Throughput, duplicates, risk-signal, event-time-lag, and processing-latency distribution metrics
+
 - Backpressure/load testing and a time-bounded, assertion-bearing soak test
