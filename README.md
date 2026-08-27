@@ -13,7 +13,7 @@ The implementation includes checkpoint restore tests, a real Kafka-to-databases 
 
 The clean build also emits a schema-validated CycloneDX runtime SBOM at `target/bom.json`. Dependabot covers Maven and GitHub Actions, while dependency review rejects newly introduced moderate-or-higher vulnerabilities.
 
-Producer-controlled invalid records are classified and quarantined rather than dropped or allowed to block valid traffic. Quarantine records retain Kafka origin, a bounded base64 payload preview, full-payload SHA-256, and a stable source-coordinate key; set `SAFETY_QUARANTINE_TOPIC` to override the default `<input-topic>.quarantine` topic.
+Producer-controlled invalid records are classified and quarantined rather than dropped or allowed to block valid traffic. Quarantine records retain Kafka origin, a bounded base64 payload preview, full-payload SHA-256, and a stable source-coordinate key; set `SAFETY_QUARANTINE_TOPIC` to override the default `<first-configured-input-topic>.quarantine` topic.
 
 Per-actor rolling history is reclaimed by event-time timers and capped by `SAFETY_MAX_HISTORY_EVENTS_PER_ACTOR` (default 100,000). A breach evicts the oldest event-time entries, increments explicit capacity metrics, and emits a replay-stable `__state_capacity__` operational risk signal rather than silently pretending configured rule counts remain complete.
 
@@ -36,7 +36,7 @@ export CLICKHOUSE_USER=default
 export CLICKHOUSE_PASSWORD='your-password'
 export SAFETY_RULES_PATH=conf/safety-rules.json
 java -jar target/safety-stream-0.1.0-SNAPSHOT-app.jar \
-  localhost:9092 safety-events safety-platform-v1 redis://localhost:6379 \
+  localhost:9092 content-events,activity-events,moderation-events safety-platform-v1 redis://localhost:6379 \
   jdbc:clickhouse:http://localhost:8123/default
 ```
 

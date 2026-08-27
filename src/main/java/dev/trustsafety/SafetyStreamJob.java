@@ -16,6 +16,7 @@ import dev.trustsafety.sink.RedisHotStateStore;
 import dev.trustsafety.sink.RiskSignalSink;
 import dev.trustsafety.testing.FailureInjector;
 import java.time.Duration;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
@@ -36,7 +37,7 @@ import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 
 public final class SafetyStreamJob {
   private static final String USAGE =
-      "usage: <bootstrap-servers> <topic> <group-id> <redis-uri> <clickhouse-jdbc-url>";
+      "usage: <bootstrap-servers> <topic[,topic...]> <group-id> <redis-uri> <clickhouse-jdbc-url>";
 
   private SafetyStreamJob() {}
 
@@ -44,6 +45,17 @@ public final class SafetyStreamJob {
     return WatermarkStrategy.<SafetyEvent>forBoundedOutOfOrderness(Duration.ofSeconds(10))
         .withTimestampAssigner((event, ignored) -> event.occurredAt().toEpochMilli())
         .withIdleness(Duration.ofMinutes(1));
+  }
+
+  static List<String> parseTopics(String value) {
+    if (value == null || value.isBlank())
+      throw new IllegalArgumentException("at least one Kafka topic is required");
+    List<String> topics = java.util.Arrays.stream(value.split(",", -1)).map(String::trim).toList();
+    if (topics.stream().anyMatch(String::isEmpty))
+      throw new IllegalArgumentException("Kafka topic names must not be blank");
+    if (new LinkedHashSet<>(topics).size() != topics.size())
+      throw new IllegalArgumentException("Kafka topic names must be unique");
+    return topics;
   }
 
   public static DataStream<RiskSignal> buildEvaluationPipeline(
@@ -180,10 +192,11 @@ public final class SafetyStreamJob {
     RuntimeConfig config = RuntimeConfig.fromEnvironment(System.getenv());
     StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
     configureReliability(env, config);
+    List<String> topics = parseTopics(args[1]);
     KafkaSource<IngestedSafetyRecord> source =
         KafkaSource.<IngestedSafetyRecord>builder()
             .setBootstrapServers(args[0])
-            .setTopics(args[1])
+            .setTopics(topics)
             .setGroupId(args[2])
             .setStartingOffsets(OffsetsInitializer.committedOffsets(OffsetResetStrategy.EARLIEST))
             .setDeserializer(new SafetyEventDeserializer())
@@ -201,7 +214,7 @@ public final class SafetyStreamJob {
                     quarantined,
                     args[0],
                     System.getenv()
-                        .getOrDefault("SAFETY_QUARANTINE_TOPIC", args[1] + ".quarantine")));
+                        .getOrDefault("SAFETY_QUARANTINE_TOPIC", topics.get(0) + ".quarantine")));
     attachServingSinks(
         signals,
         args[3],

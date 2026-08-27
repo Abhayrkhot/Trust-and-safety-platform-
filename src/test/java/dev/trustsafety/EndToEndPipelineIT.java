@@ -222,6 +222,54 @@ class EndToEndPipelineIT {
         .isEqualTo(poisonOffsets.size());
   }
 
+  @Test
+  void parallelTopicsConvergeIntoOneKeyedActorRiskSignal() throws Exception {
+    List<String> topics =
+        List.of("content-events-e2e", "activity-events-e2e", "moderation-events-e2e");
+    produce(topics.get(0), eventForActor("content-1", "actor-cross-stream", 1, 40));
+    produce(topics.get(1), eventForActor("activity-1", "actor-cross-stream", 2, 40));
+    produce(topics.get(2), eventForActor("moderation-1", "actor-cross-stream", 3, 40));
+
+    StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+    env.setParallelism(3);
+    var signals =
+        SafetyStreamJob.buildEvaluationPipeline(
+            env,
+            source(topics, "cross-stream-group"),
+            List.of(new RuleConfig("cross-stream-rule", 60_000, 3, 120, 97)),
+            ignored -> {});
+    String redisUri = "redis://" + REDIS.getHost() + ":" + REDIS.getMappedPort(6379);
+    SafetyStreamJob.attachServingSinks(
+        signals,
+        redisUri,
+        CLICKHOUSE.getJdbcUrl(),
+        CLICKHOUSE.getUsername(),
+        CLICKHOUSE.getPassword());
+
+    env.execute("multi-topic-cross-stream-e2e");
+
+    RedisClient redis = RedisClient.create(redisUri);
+    try (var connection = redis.connect()) {
+      assertThat(connection.sync().hget(RedisHotStateStore.key("actor-cross-stream"), "payload"))
+          .contains("cross-stream-rule")
+          .contains("\"observed_event_count\":3")
+          .contains("\"risk_score\":97");
+    } finally {
+      redis.shutdown();
+    }
+    try (var connection =
+            DriverManager.getConnection(
+                CLICKHOUSE.getJdbcUrl(), CLICKHOUSE.getUsername(), CLICKHOUSE.getPassword());
+        var statement = connection.createStatement();
+        var rows =
+            statement.executeQuery(
+                "SELECT count(),any(observed_event_count) FROM risk_signals FINAL WHERE rule_id='cross-stream-rule'")) {
+      assertThat(rows.next()).isTrue();
+      assertThat(rows.getLong(1)).isOne();
+      assertThat(rows.getLong(2)).isEqualTo(3);
+    }
+  }
+
   private static List<QuarantinedEvent> consumeQuarantine(String topic, int expected)
       throws Exception {
     Properties p = new Properties();
@@ -316,9 +364,13 @@ class EndToEndPipelineIT {
   }
 
   private static KafkaSource<IngestedSafetyRecord> source(String topic, String groupId) {
+    return source(List.of(topic), groupId);
+  }
+
+  private static KafkaSource<IngestedSafetyRecord> source(List<String> topics, String groupId) {
     return KafkaSource.<IngestedSafetyRecord>builder()
         .setBootstrapServers(KAFKA.getBootstrapServers())
-        .setTopics(topic)
+        .setTopics(topics)
         .setGroupId(groupId)
         .setStartingOffsets(OffsetsInitializer.committedOffsets(OffsetResetStrategy.EARLIEST))
         .setBounded(OffsetsInitializer.latest())

@@ -104,3 +104,10 @@
 - Real Kafka contract test proves exact nonzero lag behind the head offset
 - Drain assertion proves the same live connector gauge returns to zero
 - Operations guidance separates offset lag, event-time lag, and watermark idleness
+
+## Phase 16 — Multi-topic concurrent streams
+
+- Validated comma-separated Kafka topic configuration with no blank or duplicate topics
+- Content, activity, and moderation topics consumed by one parallel Kafka source
+- Actor-keyed rule state combines events across topic/partition boundaries
+- Exact Redis and ClickHouse assertions for the cross-stream risk signal
