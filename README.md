@@ -19,7 +19,7 @@ mvn package
 export CLICKHOUSE_USER=default
 export CLICKHOUSE_PASSWORD='your-password'
 export SAFETY_RULES_PATH=conf/safety-rules.json
-java -cp target/safety-stream-0.1.0-SNAPSHOT.jar dev.trustsafety.SafetyStreamJob \
+java -jar target/safety-stream-0.1.0-SNAPSHOT-app.jar \
   localhost:9092 safety-events safety-platform-v1 redis://localhost:6379 \
   jdbc:clickhouse:http://localhost:8123/default
 ```

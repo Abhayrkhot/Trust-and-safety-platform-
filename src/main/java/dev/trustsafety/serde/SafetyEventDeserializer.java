@@ -7,9 +7,18 @@ import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDe
 import org.apache.flink.util.Collector;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 
-public final class SafetyEventDeserializer implements KafkaRecordDeserializationSchema<SafetyEvent> {
-  @Override public void deserialize(ConsumerRecord<byte[], byte[]> record, Collector<SafetyEvent> out) throws IOException {
+public final class SafetyEventDeserializer
+    implements KafkaRecordDeserializationSchema<SafetyEvent> {
+  private static final long serialVersionUID = 1L;
+
+  @Override
+  public void deserialize(ConsumerRecord<byte[], byte[]> record, Collector<SafetyEvent> out)
+      throws IOException {
     out.collect(SafetyEventJson.decode(record.value()));
   }
-  @Override public TypeInformation<SafetyEvent> getProducedType() { return TypeInformation.of(SafetyEvent.class); }
+
+  @Override
+  public TypeInformation<SafetyEvent> getProducedType() {
+    return TypeInformation.of(SafetyEvent.class);
+  }
 }

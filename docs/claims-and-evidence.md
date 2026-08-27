@@ -20,6 +20,8 @@ This file is the source of truth for public claims. A claim stays unverified unt
 | A finite Kafka stream runs through the production Flink graph and writes one deduplicated risk signal to both Redis and ClickHouse with matching rule/count fields. | `EndToEndPipelineIT`; `./verify-all.sh` | Verified 2026-08-18 |
 | Strict V1 and V2 schemas coexist; V1 events normalize default tenant/trace values while V2 requires tenant identity and supports trace correlation. | schema files, `SafetyEventJsonTest`, `SchemaContractTest`; `./verify-all.sh` | Verified 2026-08-18 |
 | Safety rules load from strict external JSON, reject duplicate/unknown/invalid configuration, and filter by event type and attributes. | `RuleConfigLoaderTest`, `SafetyProcessorTest`; `./verify-all.sh` | Verified 2026-08-18 |
+| The clean gate enforces formatting, maximum-effort SpotBugs, at least 70% combined line coverage, and a runnable dependency-complete JAR entry point. | Maven configuration, `verify-all.sh`; local and CI results | Verified locally 2026-08-18; remote check pending |
+| GitHub rejects newly introduced high-severity vulnerable dependencies and runs CodeQL for Java. | `.github/workflows/security.yml`; GitHub checks | Pending remote checks |
 ## Verification runs
 
 - 2026-08-18 Phase 1: `./verify-all.sh` — PASS in the full Phase 1–2 workspace. Phase-specific branch verification is recorded in its PR. This is correctness evidence only, not a performance measurement.
@@ -30,6 +32,7 @@ This file is the source of truth for public claims. A claim stays unverified unt
 - 2026-08-18 local load harness: 50,000 events, 500 actors, parallelism 4, 1.383560 seconds, 36,138.65 events/s; Java 26.0.2, macOS arm64, 10 available processors. Embedded collection source and discard sink only.
 - 2026-08-18 Phase 6: `./verify-all.sh` — PASS; 17 unit tests plus 6 integration tests, 0 failures, 0 errors, 0 skipped. The end-to-end test used Apache Kafka 3.8, Redis 8.2, ClickHouse 25.8, the production Flink evaluation graph, and exact assertions in both stores.
 - 2026-08-18 Phase 7: `./verify-all.sh` — PASS; 25 unit/contract tests plus 6 integration tests, 0 failures, 0 errors, 0 skipped. Published Draft 2020-12 V1/V2 schemas are validated by an independent JSON Schema engine and cross-version rejection tests.
+- 2026-08-18 Phase 8 local gate: `./verify-all.sh` — PASS on Java 17.0.20; 25 unit/contract tests plus 6 integration tests, 0 failures, 0 errors, 0 skipped; maximum-effort SpotBugs reported 0 findings; combined production line coverage was 334/405 (82.47%); the dependency-complete application JAR passed archive, manifest, and launch smoke checks. GitHub-hosted CodeQL and dependency-review results remain pending until the phase PR runs.
 
 ## Baseline (2026-08-18)
 
@@ -37,4 +40,4 @@ The workspace was empty and was not a Git repository. There was no existing buil
 
 ## Measurements
 
-None. Performance numbers must include the command, source revision, hardware, dataset, warm-up, sample count, and raw output.
+The only throughput measurement currently published is the explicitly scoped embedded local-load result above. Performance numbers must include the command, source revision, hardware, dataset, warm-up, sample count, and raw output.

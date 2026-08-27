@@ -6,20 +6,22 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import dev.trustsafety.model.SafetyEvent;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.flink.util.Collector;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.Test;
 
 class SafetyEventDeserializerTest {
   private final SafetyEventDeserializer deserializer = new SafetyEventDeserializer();
 
-  @Test void decodesKafkaRecordValue() throws Exception {
+  @Test
+  void decodesKafkaRecordValue() throws Exception {
     var output = new ArrayList<SafetyEvent>();
     deserializer.deserialize(record(validJson()), collector(output));
     assertThat(output).singleElement().extracting(SafetyEvent::eventId).isEqualTo("evt-1");
   }
 
-  @Test void rejectsMalformedKafkaRecordWithoutEmitting() {
+  @Test
+  void rejectsMalformedKafkaRecordWithoutEmitting() {
     var output = new ArrayList<SafetyEvent>();
     assertThatThrownBy(() -> deserializer.deserialize(record("not-json"), collector(output)))
         .isInstanceOf(java.io.IOException.class);
@@ -27,13 +29,19 @@ class SafetyEventDeserializerTest {
   }
 
   private static ConsumerRecord<byte[], byte[]> record(String value) {
-    return new ConsumerRecord<>("safety-events", 0, 1L, null, value.getBytes(StandardCharsets.UTF_8));
+    return new ConsumerRecord<>(
+        "safety-events", 0, 1L, null, value.getBytes(StandardCharsets.UTF_8));
   }
 
   private static Collector<SafetyEvent> collector(ArrayList<SafetyEvent> output) {
     return new Collector<>() {
-      @Override public void collect(SafetyEvent event) { output.add(event); }
-      @Override public void close() {}
+      @Override
+      public void collect(SafetyEvent event) {
+        output.add(event);
+      }
+
+      @Override
+      public void close() {}
     };
   }
 
