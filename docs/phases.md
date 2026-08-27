@@ -59,3 +59,10 @@
 - Durable externalized-checkpoint settings and bounded restart policy
 - Execution-attempt-aware failure injection that survives JVM replacement
 - Recovery and incident-response runbook with explicit delivery semantics
+
+## Phase 10 — Supply-chain hardening
+
+- Patched direct dependencies with Jackson family alignment through its BOM
+- Verified CycloneDX application SBOM containing direct and transitive runtime dependencies
+- Weekly automated Maven and GitHub Actions dependency update PRs
+- GitHub vulnerability alerts and moderate-or-higher dependency-review enforcement
