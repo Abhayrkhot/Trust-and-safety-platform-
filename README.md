@@ -13,6 +13,8 @@ The implementation includes checkpoint restore tests, a real Kafka-to-databases 
 
 The clean build also emits a schema-validated CycloneDX runtime SBOM at `target/bom.json`. Dependabot covers Maven and GitHub Actions, while dependency review rejects newly introduced moderate-or-higher vulnerabilities.
 
+The revision-matched local warm-query benchmark in [docs/results/serving-query-2026-08-18.json](docs/results/serving-query-2026-08-18.json) measured Redis p95 at 0.433 ms and ClickHouse p95 at 1.609 ms across 300 response-validated queries per store. These are local warm-container round trips, not production or cold-query latency.
+
 Producer-controlled invalid records are classified and quarantined rather than dropped or allowed to block valid traffic. Quarantine records retain Kafka origin, a bounded base64 payload preview, full-payload SHA-256, and a stable source-coordinate key; set `SAFETY_QUARANTINE_TOPIC` to override the default `<first-configured-input-topic>.quarantine` topic.
 
 Per-actor rolling history is reclaimed by event-time timers and capped by `SAFETY_MAX_HISTORY_EVENTS_PER_ACTOR` (default 100,000). A breach evicts the oldest event-time entries, increments explicit capacity metrics, and emits a replay-stable `__state_capacity__` operational risk signal rather than silently pretending configured rule counts remain complete.
@@ -25,6 +27,12 @@ Requires JDK 17, Maven 3.9+, Docker, and enough local resources for Kafka, Redis
 
 ```bash
 ./verify-all.sh
+```
+
+To reproduce the separately scoped serving-query measurement:
+
+```bash
+./scripts/run-serving-query-benchmark.sh 300 50
 ```
 
 ## Run

@@ -111,3 +111,10 @@
 - Content, activity, and moderation topics consumed by one parallel Kafka source
 - Actor-keyed rule state combines events across topic/partition boundaries
 - Exact Redis and ClickHouse assertions for the cross-stream risk signal
+
+## Phase 17 — Measured serving-query latency
+
+- ClickHouse ordering supports actor-first historical lookups
+- Reproducible real Redis/ClickHouse warm-query harness with response validation
+- Fixed dataset, warm-up count, sample count, revision, containers, and machine metadata
+- Raw p50/p95/p99/max evidence with no invented latency threshold
