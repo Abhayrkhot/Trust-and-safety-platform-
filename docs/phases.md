@@ -6,7 +6,7 @@
 - Kafka source with committed offsets and strict malformed-record rejection
 - Validation tests for required fields, enum values, versions, and timestamps
 
-## Phase 2 — Stateful event-time evaluation (next)
+## Phase 2 — Stateful event-time evaluation
 
 - Bounded-out-of-orderness watermarks with idle partitions
 - Keyed TTL `event_id` deduplication
@@ -14,9 +14,14 @@
 - Configurable rules producing explainable risk signals
 - Checkpoint configuration and deterministic operator tests
 
+## Phase 3 — Serving stores
+
+- Redis hot state rejects stale event-time updates and applies TTL atomically
+- ClickHouse historical storage uses stable signal IDs for replay deduplication
+- Container-backed integration tests exercise both real databases
+
 ## Later phases (not yet claimed)
 
-- Redis hot-state and ClickHouse historical sinks with delivery-semantics tests
 - Failure injection and restart correctness
 - Prometheus lag/throughput/latency metrics
 - Backpressure/load testing and a time-bounded, assertion-bearing soak test
