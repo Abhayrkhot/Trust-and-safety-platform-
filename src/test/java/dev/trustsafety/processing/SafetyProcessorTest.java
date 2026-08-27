@@ -1,6 +1,7 @@
 package dev.trustsafety.processing;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.trustsafety.model.SafetyEvent;
 import dev.trustsafety.rules.RuleConfig;
@@ -15,6 +16,27 @@ import org.apache.flink.streaming.util.KeyedOneInputStreamOperatorTestHarness;
 import org.junit.jupiter.api.Test;
 
 class SafetyProcessorTest {
+  @Test
+  void rejectsInvalidCapacityAndReservedRuleId() {
+    assertThatThrownBy(
+            () -> new SafetyProcessor(List.of(new RuleConfig("r1", 1_000, 1, 0, 50)), 10_000, 0))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("max history");
+    assertThatThrownBy(
+            () -> new SafetyProcessor(List.of(new RuleConfig("r1", 1_000, 3, 0, 50)), 10_000, 2))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("minimumEvents");
+    assertThatThrownBy(
+            () ->
+                new SafetyProcessor(
+                    List.of(
+                        new RuleConfig(SafetyProcessor.STATE_CAPACITY_RULE_ID, 1_000, 1, 0, 50)),
+                    10_000,
+                    10))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("reserved");
+  }
+
   @Test
   void deduplicatesAndEmitsOnThreshold() throws Exception {
     var processor =
@@ -78,6 +100,7 @@ class SafetyProcessorTest {
     try {
       restored.initializeState(snapshot);
       restored.open();
+      assertThat(restored.numEventTimeTimers()).isOne();
       restored.processElement(new StreamRecord<>(event("e1", 0, 10)));
       restored.processElement(new StreamRecord<>(event("e2", 1_000, 10)));
       assertThat(restored.extractOutputValues()).hasSize(1);
@@ -98,6 +121,77 @@ class SafetyProcessorTest {
       harness.processElement(new StreamRecord<>(event("late", 5_000, 10)));
       harness.processElement(new StreamRecord<>(event("newest", 11_000, 10)));
       assertThat(harness.extractOutputValues()).hasSize(1);
+    } finally {
+      harness.close();
+    }
+  }
+
+  @Test
+  void eventTimeTimerReclaimsIdleHistory() throws Exception {
+    var processor = new SafetyProcessor(List.of(new RuleConfig("r1", 1_000, 2, 1, 50)), 10_000);
+    var harness =
+        new KeyedOneInputStreamOperatorTestHarness<>(
+            new KeyedProcessOperator<>(processor), SafetyEvent::actorId, Types.STRING);
+    try {
+      harness.open();
+      harness.processElement(new StreamRecord<>(event("e1", 0, 10)));
+      int stateEntriesBeforeCleanup = harness.numKeyedStateEntries();
+      assertThat(harness.numEventTimeTimers()).isOne();
+
+      harness.processWatermark(1_001);
+
+      assertThat(harness.numEventTimeTimers()).isZero();
+      assertThat(harness.numKeyedStateEntries()).isLessThan(stateEntriesBeforeCleanup);
+    } finally {
+      harness.close();
+    }
+  }
+
+  @Test
+  void capsHotActorHistoryByEventTimeAndEmitsOperationalRiskSignal() throws Exception {
+    var processor =
+        new SafetyProcessor(List.of(new RuleConfig("r1", 60_000, 2, 1_000, 50)), 120_000, 2);
+    var harness =
+        new KeyedOneInputStreamOperatorTestHarness<>(
+            new KeyedProcessOperator<>(processor), SafetyEvent::actorId, Types.STRING);
+    try {
+      harness.open();
+      harness.processElement(new StreamRecord<>(event("e1", 10, 10)));
+      harness.processElement(new StreamRecord<>(event("e2", 20, 20)));
+      harness.processElement(new StreamRecord<>(event("e3", 5, 30)));
+
+      assertThat(harness.extractOutputValues())
+          .singleElement()
+          .satisfies(
+              signal -> {
+                assertThat(signal.ruleId()).isEqualTo(SafetyProcessor.STATE_CAPACITY_RULE_ID);
+                assertThat(signal.triggeringEventId()).isEqualTo("e3");
+                assertThat(signal.riskScore()).isEqualTo(100);
+                assertThat(signal.observedEventCount()).isEqualTo(2);
+                assertThat(signal.observedSeveritySum()).isEqualTo(30);
+                assertThat(signal.reason())
+                    .contains("history_capacity=2")
+                    .contains("operator_action_required=true");
+              });
+    } finally {
+      harness.close();
+    }
+  }
+
+  @Test
+  void doesNotEmitRuleSignalForEventOlderThanRetentionHorizon() throws Exception {
+    var processor = new SafetyProcessor(List.of(new RuleConfig("r1", 1_000, 1, 0, 50)), 10_000);
+    var harness =
+        new KeyedOneInputStreamOperatorTestHarness<>(
+            new KeyedProcessOperator<>(processor), SafetyEvent::actorId, Types.STRING);
+    try {
+      harness.open();
+      harness.processElement(new StreamRecord<>(event("new", 10_000, 10)));
+      harness.getOutput().clear();
+
+      harness.processElement(new StreamRecord<>(event("too-late", 8_999, 10)));
+
+      assertThat(harness.extractOutputValues()).isEmpty();
     } finally {
       harness.close();
     }

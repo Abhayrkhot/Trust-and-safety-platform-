@@ -20,6 +20,7 @@ class RuntimeConfigTest {
     assertThat(config.checkpointMinPause()).isEqualTo(Duration.ofSeconds(10));
     assertThat(config.restartAttempts()).isEqualTo(3);
     assertThat(config.restartDelay()).isEqualTo(Duration.ofSeconds(5));
+    assertThat(config.maxHistoryEventsPerActor()).isEqualTo(100_000);
     assertThat(config.failureAfterEvents()).isEmpty();
   }
 
@@ -36,12 +37,14 @@ class RuntimeConfigTest {
                 "SAFETY_CHECKPOINT_MIN_PAUSE_MS", "15000",
                 "SAFETY_RESTART_ATTEMPTS", "5",
                 "SAFETY_RESTART_DELAY_MS", "7000",
+                "SAFETY_MAX_HISTORY_EVENTS_PER_ACTOR", "25000",
                 "SAFETY_FAIL_AFTER_EVENTS", "123"));
 
     assertThat(config.checkpointUri()).hasValueSatisfying(uri -> assertThat(uri).hasScheme("s3"));
     assertThat(config.environment()).isEqualTo(RuntimeConfig.Environment.PRODUCTION);
     assertThat(config.checkpointInterval()).isEqualTo(Duration.ofSeconds(45));
     assertThat(config.restartAttempts()).isEqualTo(5);
+    assertThat(config.maxHistoryEventsPerActor()).isEqualTo(25_000);
     assertThat(config.failureAfterEvents()).contains(123L);
   }
 
@@ -90,5 +93,9 @@ class RuntimeConfigTest {
     assertThatThrownBy(() -> RuntimeConfig.fromEnvironment(Map.of("SAFETY_RULES_PATH", "")))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("rulesPath");
+    assertThatThrownBy(
+            () -> RuntimeConfig.fromEnvironment(Map.of("SAFETY_MAX_HISTORY_EVENTS_PER_ACTOR", "0")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("maxHistoryEventsPerActor");
   }
 }

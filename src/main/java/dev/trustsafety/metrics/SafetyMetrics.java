@@ -12,9 +12,10 @@ import org.apache.flink.metrics.MetricGroup;
 
 /** Central metric contract exported by Flink reporters, including Prometheus. */
 public final class SafetyMetrics {
-  private final Counter events, duplicates, signals;
+  private final Counter events, duplicates, signals, historyExpired, lateBeyondHistory;
+  private final Counter stateCapacityBreaches, stateCapacityEvictions;
   private final Meter throughput;
-  private final Histogram latency;
+  private final Histogram latency, historySize;
   private final AtomicLong eventTimeLagMillis = new AtomicLong();
 
   public SafetyMetrics(MetricGroup root) {
@@ -22,10 +23,19 @@ public final class SafetyMetrics {
     events = group.counter("events_total");
     duplicates = group.counter("duplicates_total");
     signals = group.counter("risk_signals_total");
+    historyExpired = group.counter("history_expired_events_total");
+    lateBeyondHistory = group.counter("late_events_beyond_history_total");
+    stateCapacityBreaches = group.counter("state_capacity_breaches_total");
+    stateCapacityEvictions = group.counter("state_capacity_evictions_total");
     throughput = group.meter("events_per_second", new MeterView(events, 60));
     latency =
         group.histogram(
             "processing_latency_ms",
+            new DropwizardHistogramWrapper(
+                new com.codahale.metrics.Histogram(new SlidingWindowReservoir(10_000))));
+    historySize =
+        group.histogram(
+            "history_events_per_actor",
             new DropwizardHistogramWrapper(
                 new com.codahale.metrics.Histogram(new SlidingWindowReservoir(10_000))));
     group.gauge("event_time_lag_ms", eventTimeLagMillis::get);
@@ -43,5 +53,22 @@ public final class SafetyMetrics {
 
   public void onSignal() {
     signals.inc();
+  }
+
+  public void onHistoryExpired(long count) {
+    historyExpired.inc(count);
+  }
+
+  public void onLateBeyondHistory() {
+    lateBeyondHistory.inc();
+  }
+
+  public void onStateCapacityBreach(long evicted) {
+    stateCapacityBreaches.inc();
+    stateCapacityEvictions.inc(evicted);
+  }
+
+  public void onHistorySize(int size) {
+    historySize.update(size);
   }
 }

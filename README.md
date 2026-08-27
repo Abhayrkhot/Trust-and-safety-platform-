@@ -15,6 +15,8 @@ The clean build also emits a schema-validated CycloneDX runtime SBOM at `target/
 
 Producer-controlled invalid records are classified and quarantined rather than dropped or allowed to block valid traffic. Quarantine records retain Kafka origin, a bounded base64 payload preview, full-payload SHA-256, and a stable source-coordinate key; set `SAFETY_QUARANTINE_TOPIC` to override the default `<input-topic>.quarantine` topic.
 
+Per-actor rolling history is reclaimed by event-time timers and capped by `SAFETY_MAX_HISTORY_EVENTS_PER_ACTOR` (default 100,000). A breach evicts the oldest event-time entries, increments explicit capacity metrics, and emits a replay-stable `__state_capacity__` operational risk signal rather than silently pretending configured rule counts remain complete.
+
 Delivery semantics are explicit: Flink state and Kafka offsets use exactly-once checkpoints; Redis, ClickHouse, and Kafka quarantine are at-least-once sinks. Serving-store replays are idempotent through stable signal IDs and event-time ordering, while quarantine replays remain identifiable through the stable source-coordinate key. No end-to-end exactly-once or production throughput claim is made.
 
 ## Verify

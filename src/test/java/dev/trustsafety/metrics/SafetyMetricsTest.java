@@ -20,18 +20,49 @@ class SafetyMetricsTest {
     metrics.onEvent(event(950, 900), 1_000);
     metrics.onDuplicate();
     metrics.onSignal();
+    metrics.onHistoryExpired(3);
+    metrics.onLateBeyondHistory();
+    metrics.onStateCapacityBreach(2);
+    metrics.onHistorySize(7);
     assertThat(listener.getCounter("trust_safety", "events_total").map(Counter::getCount))
         .contains(2L);
     assertThat(listener.getCounter("trust_safety", "duplicates_total").map(Counter::getCount))
         .contains(1L);
     assertThat(listener.getCounter("trust_safety", "risk_signals_total").map(Counter::getCount))
         .contains(1L);
+    assertThat(
+            listener
+                .getCounter("trust_safety", "history_expired_events_total")
+                .map(Counter::getCount))
+        .contains(3L);
+    assertThat(
+            listener
+                .getCounter("trust_safety", "late_events_beyond_history_total")
+                .map(Counter::getCount))
+        .contains(1L);
+    assertThat(
+            listener
+                .getCounter("trust_safety", "state_capacity_breaches_total")
+                .map(Counter::getCount))
+        .contains(1L);
+    assertThat(
+            listener
+                .getCounter("trust_safety", "state_capacity_evictions_total")
+                .map(Counter::getCount))
+        .contains(2L);
     Histogram histogram =
         listener.getHistogram("trust_safety", "processing_latency_ms").orElseThrow();
     assertThat(histogram.getCount()).isEqualTo(2);
     assertThat(histogram.getStatistics().getQuantile(.50)).isBetween(100.0, 200.0);
     assertThat(histogram.getStatistics().getQuantile(.95)).isBetween(100.0, 200.0);
     assertThat(histogram.getStatistics().getQuantile(.99)).isBetween(100.0, 200.0);
+    assertThat(
+            listener
+                .getHistogram("trust_safety", "history_events_per_actor")
+                .orElseThrow()
+                .getStatistics()
+                .getMax())
+        .isEqualTo(7);
     Gauge<?> lag = listener.getGauge("trust_safety", "event_time_lag_ms").orElseThrow();
     assertThat(lag.getValue()).isEqualTo(50L);
     assertThat(listener.getMeter("trust_safety", "events_per_second")).isPresent();
