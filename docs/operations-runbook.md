@@ -33,7 +33,11 @@ Expected evidence is a failed initial execution attempt, a successful restart, a
 
 ## Observability
 
-The `trust_safety` metric group exports accepted/quarantined ingestion counts, input count/rate, duplicate count, emitted-signal count, event-time lag, processing-latency histogram data, per-actor history-size samples, expired-history counts, beyond-retention late events, and state-capacity breaches/evictions. A capacity breach emits the replay-stable `__state_capacity__` risk signal at score 100 because configured rules may undercount after eviction; operators must investigate instead of treating it as a normal policy match. Event-time timers reclaim idle-key history after the longest rule window. Deduplication state remains time-bounded by its processing-time TTL rather than count-bounded. The Prometheus reporter configuration is in `conf/flink-conf.yaml`. Alert thresholds must be derived from deployment measurements; this repository does not invent production thresholds.
+The `trust_safety` metric group exports accepted/quarantined ingestion counts, input count/rate, duplicate count, emitted-signal count, event-time lag, processing-latency histogram data, per-actor history-size samples, expired-history counts, beyond-retention late events, and state-capacity breaches/evictions. A capacity breach emits the replay-stable `__state_capacity__` risk signal at score 100 because configured rules may undercount after eviction; operators must investigate instead of treating it as a normal policy match. Event-time timers reclaim idle-key history after the longest rule window. Deduplication state remains time-bounded by its processing-time TTL rather than count-bounded.
+
+The Flink Kafka source separately exports the standard `pendingRecords` gauge: the connector sums Kafka's per-partition `records-lag` values, so this is consumer offset lag rather than event-time lag. `KafkaConsumerLagIT` proves the contract against real Kafka by observing lag 4 after consuming one of five records and zero after draining the remaining four. Keep alerts for `pendingRecords`, `event_time_lag_ms`, and watermark idleness separate because they diagnose different failure modes.
+
+The Prometheus reporter configuration is in `conf/flink-conf.yaml`. Metric names include the configured Flink scope; select the series whose metric suffix is `pendingRecords` for the Kafka source operator. Alert thresholds must be derived from deployment measurements; this repository does not invent production thresholds.
 
 ## Quarantine response
 

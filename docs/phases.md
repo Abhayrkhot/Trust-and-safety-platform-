@@ -97,3 +97,10 @@
 - Replay-stable operational risk signal and dedicated capacity metrics on breach
 - Event-time timers reclaim idle history and survive checkpoint/restore
 - Explicit telemetry for expired history and arrivals beyond the retention horizon
+
+## Phase 15 — Kafka consumer-offset lag evidence
+
+- Standard Flink Kafka-source `pendingRecords` gauge exported through the Prometheus reporter
+- Real Kafka contract test proves exact nonzero lag behind the head offset
+- Drain assertion proves the same live connector gauge returns to zero
+- Operations guidance separates offset lag, event-time lag, and watermark idleness
