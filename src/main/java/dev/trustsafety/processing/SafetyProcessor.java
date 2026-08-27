@@ -15,7 +15,6 @@ import org.apache.flink.api.common.state.MapStateDescriptor;
 import org.apache.flink.api.common.state.StateTtlConfig;
 import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
-import org.apache.flink.api.common.time.Time;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
@@ -46,7 +45,7 @@ public final class SafetyProcessor extends KeyedProcessFunction<String, SafetyEv
     MapStateDescriptor<String, Boolean> descriptor =
         new MapStateDescriptor<>("seen-event-ids", String.class, Boolean.class);
     descriptor.enableTimeToLive(
-        StateTtlConfig.newBuilder(Time.milliseconds(dedupTtlMillis))
+        StateTtlConfig.newBuilder(java.time.Duration.ofMillis(dedupTtlMillis))
             .setUpdateType(StateTtlConfig.UpdateType.OnCreateAndWrite)
             .setStateVisibility(StateTtlConfig.StateVisibility.NeverReturnExpired)
             .build());

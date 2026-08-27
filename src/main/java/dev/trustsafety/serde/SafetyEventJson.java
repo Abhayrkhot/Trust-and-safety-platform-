@@ -124,8 +124,8 @@ public final class SafetyEventJson {
     if (n == null || n.isNull()) return Map.of();
     if (!n.isObject()) throw new IllegalArgumentException("attributes must be object");
     Map<String, String> out = new HashMap<>();
-    n.fields()
-        .forEachRemaining(
+    n.properties()
+        .forEach(
             e -> {
               if (!e.getValue().isTextual())
                 throw new IllegalArgumentException("attribute values must be strings");

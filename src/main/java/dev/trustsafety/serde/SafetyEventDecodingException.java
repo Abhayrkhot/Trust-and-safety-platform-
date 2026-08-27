@@ -4,6 +4,8 @@ import java.io.IOException;
 
 /** A stable, matchable classification for producer-controlled decoding failures. */
 public final class SafetyEventDecodingException extends IOException {
+  private static final long serialVersionUID = 1L;
+
   public enum Reason {
     NULL_PAYLOAD,
     MALFORMED_JSON,

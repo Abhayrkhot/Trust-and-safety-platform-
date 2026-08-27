@@ -4,7 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
 import org.apache.flink.streaming.api.functions.sink.SinkFunction;
@@ -17,7 +18,11 @@ class FailureRecoveryIT {
     RecordingSink.reset();
     StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
     env.setParallelism(1);
-    env.setRestartStrategy(RestartStrategies.fixedDelayRestart(1, 0));
+    Configuration restart = new Configuration();
+    restart.set(RestartStrategyOptions.RESTART_STRATEGY, "fixed-delay");
+    restart.set(RestartStrategyOptions.RESTART_STRATEGY_FIXED_DELAY_ATTEMPTS, 1);
+    restart.set(RestartStrategyOptions.RESTART_STRATEGY_FIXED_DELAY_DELAY, java.time.Duration.ZERO);
+    env.configure(restart);
     env.fromSequence(1, 100).map(new FailureInjector<Long>(id, 50)).addSink(new RecordingSink());
     env.execute("failure-recovery-it");
     assertThat(RecordingSink.VALUES)
@@ -27,6 +32,8 @@ class FailureRecoveryIT {
 
   @SuppressWarnings("deprecation")
   static final class RecordingSink extends RichSinkFunction<Long> {
+    private static final long serialVersionUID = 1L;
+
     static final Set<Long> VALUES = ConcurrentHashMap.newKeySet();
 
     static void reset() {

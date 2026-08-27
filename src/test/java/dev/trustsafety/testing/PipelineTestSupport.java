@@ -39,7 +39,7 @@ final class PipelineTestSupport {
       List<SafetyEvent> input,
       RiskSignalStoreFactory factory,
       int sinkParallelism) {
-    env.fromCollection(input)
+    env.fromData(input)
         .keyBy(SafetyEvent::actorId)
         .process(
             new SafetyProcessor(

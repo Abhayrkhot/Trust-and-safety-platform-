@@ -20,12 +20,15 @@ import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
+import org.apache.flink.configuration.CheckpointingOptions;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.ExternalizedCheckpointRetention;
+import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.KafkaSink;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
-import org.apache.flink.streaming.api.CheckpointingMode;
+import org.apache.flink.core.execution.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -93,12 +96,22 @@ public final class SafetyStreamJob {
     checkpoints.setMinPauseBetweenCheckpoints(config.checkpointMinPause().toMillis());
     checkpoints.setMaxConcurrentCheckpoints(1);
     checkpoints.setTolerableCheckpointFailureNumber(0);
-    checkpoints.enableExternalizedCheckpoints(
-        CheckpointConfig.ExternalizedCheckpointCleanup.RETAIN_ON_CANCELLATION);
-    config.checkpointUri().ifPresent(checkpoints::setCheckpointStorage);
-    env.setRestartStrategy(
-        RestartStrategies.fixedDelayRestart(
-            config.restartAttempts(), config.restartDelay().toMillis()));
+    checkpoints.setExternalizedCheckpointRetention(
+        ExternalizedCheckpointRetention.RETAIN_ON_CANCELLATION);
+    config
+        .checkpointUri()
+        .ifPresent(
+            uri -> {
+              Configuration storage = new Configuration();
+              storage.set(CheckpointingOptions.CHECKPOINTS_DIRECTORY, uri.toString());
+              env.configure(storage);
+            });
+    Configuration restart = new Configuration();
+    restart.set(RestartStrategyOptions.RESTART_STRATEGY, "fixed-delay");
+    restart.set(
+        RestartStrategyOptions.RESTART_STRATEGY_FIXED_DELAY_ATTEMPTS, config.restartAttempts());
+    restart.set(RestartStrategyOptions.RESTART_STRATEGY_FIXED_DELAY_DELAY, config.restartDelay());
+    env.configure(restart);
   }
 
   public static void attachServingSinks(
